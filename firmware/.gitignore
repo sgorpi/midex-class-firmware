@@ -1,0 +1,12 @@
+# SDCC build artifacts (rebuild with `make`). USBJmpTb.a51 is source (kept).
+*.asm
+*.lst
+*.rel
+*.rst
+*.sym
+*.ihx
+*.hex
+*.lk
+*.map
+*.mem
+*.cdb

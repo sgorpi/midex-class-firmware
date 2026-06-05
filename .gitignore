@@ -1,0 +1,21 @@
+# SDCC / 8051 build artifacts (see firmware/Makefile `clean`)
+*.asm
+*.lst
+*.rst
+*.sym
+*.rel
+*.ihx
+*.hex
+*.lnk
+*.lk
+*.map
+*.mem
+*.cdb
+
+# Python
+__pycache__/
+*.pyc
+
+# C host tool build (CMake)
+host/build/
+compile_commands.json
