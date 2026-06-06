@@ -88,11 +88,14 @@
 #define UART_IER_ERBFI       0x01     /* IER bit0: enable RX-data interrupt  */
 
 /* ---- EZ-USB control / endpoint buffers (AN2131) ----------------------- */
+/* Class firmware uses the EP2 bulk pair (EP2-IN + EP2-OUT) for MIDI. The bridge
+ * code addresses these via the reg_ezusb.h SFRX symbols (IN2BUF/OUT2BUF/IN2BC/
+ * OUT2BC); the addresses are recorded here for documentation. */
 #define EZUSB_CPUCS          0x7F92
-#define EZUSB_EP2IN_BUF      0x7E00   /* device->host MIDI                 */
-#define EZUSB_EP2IN_BC       0x7FB9
-#define EZUSB_EP4OUT_BUF     0x7BC0   /* host->device MIDI                 */
-#define EZUSB_EP4OUT_BC      0x7FD1
+#define EZUSB_EP2IN_BUF      0x7E00   /* device->host MIDI (IN2BUF)        */
+#define EZUSB_EP2IN_BC       0x7FB9   /* IN2BC                             */
+#define EZUSB_EP2OUT_BUF     0x7DC0   /* host->device MIDI (OUT2BUF)       */
+#define EZUSB_EP2OUT_BC      0x7FC9   /* OUT2BC                            */
 
 /* ---- Not present / not used on r1 ------------------------------------- */
 #define BOARD_HAS_FX_INIT    0        /* r2 sets 0x7FE5; r1 does not        */

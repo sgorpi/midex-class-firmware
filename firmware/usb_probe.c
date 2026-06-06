@@ -12,19 +12,20 @@
  *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
  *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
  *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU General Public License     *
+ *   along with this program; if not, write to the                         *
+ *   Free Software Foundation, Inc.,                                       *
+ *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
 /**
- * @file USB SETUP / enumeration engine for the class-compliant MIDEX8 firmware.
+ * @file Defines USB descriptors, interrupt routines and helper functions.
+ * To minimize code size, we make the following assumptions:
+ *  - the device has exactly one configuration
+ *  - and exactly one alternate setting
  *
- * Vendored from src/ezusb-firmware (OpenULINK fork) and trimmed to the
- * class-compliant spike: the descriptor data now lives in usb_descriptors.c
- * (referenced here as externs), and non-standard (class/vendor) control
- * requests are stalled -- a class-compliant MIDIStreaming device needs no
- * device-specific control requests.
- *
- * Assumptions (to minimise code size): exactly one configuration and one
- * alternate setting, so Set Configuration is a no-op.
+ * Therefore, we do not have to support the Set Configuration USB request.
  */
 
 #include "usb.h"
@@ -32,22 +33,136 @@
 #include "delay.h"
 #include "io.h"
 
-/* Also update external declarations in "usb.h" if making changes to these. */
+/// USB idVendor value - Steinberg
+#define ID_VENDOR   0x0A4E
+/// USB idProduct value - MIDEX8 r1 bus-probe (vendor-class; outside the
+/// snd-usb-midex table). Distinct from the class-compliant spike PID 0x10C1.
+#define ID_PRODUCT  0x10C0
+/// USB bcdDevice value, Release Number (in BCD)
+#define BCD_DEVICE  0x0100
+
+/* Also update external declarations in "include/usb.h" if making changes to
+ * these variables! */
 volatile bool Semaphore_Command = 0;
 volatile bool Semaphore_EP2_out = 0;
 volatile bool Semaphore_EP2_in  = 0;
 
 volatile __xdata __at 0x7FE8 struct setup_data setup_data;
 
-/* Descriptors live in usb_descriptors.c. The configuration-and-below block is
- * one contiguous __code byte array (config_block) so the SUDPTR auto-length
- * engine can stream it from its wTotalLength field. */
-extern __code struct usb_device_descriptor device_descriptor;
-extern __code uint8_t config_block[];
-extern __code struct usb_language_descriptor language_descriptor;
-extern __code struct usb_string_descriptor *__code en_string_descriptors[];
+/* Define number of endpoints (except Control Endpoint 0) in a central place.
+ * Be sure to include the neccessary endpoint descriptors! */
+#define NUM_ENDPOINTS  2
+
+/*
+ * Normally, we would initialize the descriptor structures in C99 style:
+ *
+ * __code usb_device_descriptor_t device_descriptor = {
+ *   .bLength = foo,
+ *   .bDescriptorType = bar,
+ *   .bcdUSB = 0xABCD,
+ *   ...
+ * };
+ *
+ * But SDCC currently does not support this, so we have to do it the
+ * old-fashioned way...
+ */
+
+__code struct usb_device_descriptor device_descriptor = {
+  /* .bLength = */             sizeof(struct usb_device_descriptor),
+  /* .bDescriptorType = */     USB_DESCRIPTOR_TYPE_DEVICE,
+  /* .bcdUSB = */              0x0110, /* BCD: 01.10 (Version 1.1 USB spec) */
+  /* .bDeviceClass = */        USB_CLASS_VENDOR_SPEC,
+  /* .bDeviceSubClass = */     USB_CLASS_VENDOR_SPEC,
+  /* .bDeviceProtocol = */     USB_PROTOCOL_VENDOR_SPEC,
+  /* .bMaxPacketSize0 = */     64,
+  /* .idVendor = */            ID_VENDOR,
+  /* .idProduct = */           ID_PRODUCT,
+  /* .bcdDevice = */           BCD_DEVICE,
+  /* .iManufacturer = */       1,
+  /* .iProduct = */            2,
+  /* .iSerialNumber = */       3,
+  /* .bNumConfigurations = */  1
+};
+
+/* WARNING: ALL config, interface and endpoint descriptors MUST be adjacent! */
+
+__code struct usb_config_descriptor config_descriptor = {
+  /* .bLength = */             sizeof(struct usb_config_descriptor),
+  /* .bDescriptorType = */     USB_DESCRIPTOR_TYPE_CONFIGURATION,
+  /* .wTotalLength = */        sizeof(struct usb_config_descriptor) +
+                               sizeof(struct usb_interface_descriptor) +
+                               (NUM_ENDPOINTS *
+                               sizeof(struct usb_endpoint_descriptor)),
+  /* .bNumInterfaces = */      1,
+  /* .bConfigurationValue = */ 1,
+  /* .iConfiguration = */      4,     /* String describing this configuration */
+  /* .bmAttributes = */        USB_CONFIG_ATTRIB_RESERVED,  /* Only MSB set according to USB spec */
+  /* .MaxPower = */            50     /* 50*2 = 100 mA */
+};
+
+__code struct usb_interface_descriptor interface_descriptor00 = {
+  /* .bLength = */             sizeof(struct usb_interface_descriptor),
+  /* .bDescriptorType = */     USB_DESCRIPTOR_TYPE_INTERFACE,
+  /* .bInterfaceNumber = */    0,
+  /* .bAlternateSetting = */   0,
+  /* .bNumEndpoints = */       NUM_ENDPOINTS,
+  /* .bInterfaceClass = */     USB_CLASS_VENDOR_SPEC,
+  /* .bInterfaceSubclass = */  USB_CLASS_VENDOR_SPEC,
+  /* .bInterfaceProtocol = */  USB_PROTOCOL_VENDOR_SPEC,
+  /* .iInterface = */          5
+};
+
+__code struct usb_endpoint_descriptor Bulk_EP2_IN_Endpoint_Descriptor = {
+  /* .bLength = */             sizeof(struct usb_endpoint_descriptor),
+  /* .bDescriptorType = */     USB_DESCRIPTOR_TYPE_ENDPOINT,
+  /* .bEndpointAddress = */    2 | USB_DIR_IN,
+  /* .bmAttributes = */        USB_ENDPOINT_TYPE_BULK,
+  /* .wMaxPacketSize = */      64,
+  /* .bInterval = */           0
+};
+
+__code struct usb_endpoint_descriptor Bulk_EP2_OUT_Endpoint_Descriptor = {
+  /* .bLength = */             sizeof(struct usb_endpoint_descriptor),
+  /* .bDescriptorType = */     USB_DESCRIPTOR_TYPE_ENDPOINT,
+  /* .bEndpointAddress = */    2 | USB_DIR_OUT,
+  /* .bmAttributes = */        USB_ENDPOINT_TYPE_BULK,
+  /* .wMaxPacketSize = */      64,
+  /* .bInterval = */           0
+};
+
+__code struct usb_language_descriptor language_descriptor = {
+  /* .bLength =  */            4,
+  /* .bDescriptorType = */     USB_DESCRIPTOR_TYPE_STRING,
+  /* .wLANGID = */             {USB_LANG_ENGLISH_US}
+};
+
+/* String Descriptors */
+
+__code struct usb_string_descriptor strManufacturer  = STR_DESCR(9, 'S','t','e','i','n','b','e','r','g');
+
+__code struct usb_string_descriptor strProduct       = STR_DESCR(16, 'M','I','D','E','X','8',' ','b','u','s','-','p','r','o','b','e');
+
+__code struct usb_string_descriptor strSerialNumber  = STR_DESCR( 6, '0','0','0','0','0','1');
+
+__code struct usb_string_descriptor strConfigDescr   = STR_DESCR( 8, 'M','y','C','o','n','f','i','g');
+
+__code struct usb_string_descriptor strInterface     = STR_DESCR(11, 'M','y','I','n','t','e','r','f','a','c','e');
+
+/* Table containing pointers to string descriptors */
+__code struct usb_string_descriptor* __code en_string_descriptors[5] = {
+  &strManufacturer,
+  &strProduct,
+  &strSerialNumber,
+  &strConfigDescr,
+  &strInterface
+};
 
 static void usb_handle_setup_data(void);
+
+/* Provided by main.c. Handles the bus-probe vendor register R/W commands.
+ * Called synchronously from the SUDAV path so writes complete before the EP0
+ * status stage is ACKed (see handle_vendor_command comment in main.c). */
+extern void handle_vendor_command(void);
 
 void sudav_isr(void) __interrupt SUDAV_ISR {
   CLEAR_IRQ();
@@ -72,11 +187,11 @@ void ep1out_isr(void)   __interrupt EP1OUT_ISR   { }
 /**
  * EP2 IN: called after the transfer from uC->Host has finished: we sent data
  */
-void ep2in_isr(void)    __interrupt EP2IN_ISR {
+void ep2in_isr(void)    __interrupt EP2IN_ISR { 
   Semaphore_EP2_in = 1;
 
   CLEAR_IRQ();
-  IN07IRQ = IN2IR;     // Clear IN2 IRQ
+  IN07IRQ = IN2IR;     // Clear OUT2 IRQ
 }
 
 /**
@@ -243,8 +358,7 @@ static bool usb_handle_clear_feature(void) {
     }
     break;
   default:
-    /* Unsupported recipient */
-    break;
+    /* Vendor commands... */
   }
 
   return true;
@@ -280,7 +394,7 @@ static bool usb_handle_set_feature(void) {
     }
     break;
   default:
-    /* Unsupported recipient */
+    /* Vendor commands... */
     break;
   }
 
@@ -306,9 +420,8 @@ static bool usb_handle_get_descriptor(void) {
     SUDPTRL = LO8(&device_descriptor);
     break;
   case USB_DESCRIPTOR_TYPE_CONFIGURATION:
-    /* SUDPTR streams wTotalLength bytes of the contiguous config_block. */
-    SUDPTRH = HI8(config_block);
-    SUDPTRL = LO8(config_block);
+    SUDPTRH = HI8(&config_descriptor);
+    SUDPTRL = LO8(&config_descriptor);
     break;
   case USB_DESCRIPTOR_TYPE_STRING:
     if (setup_data.wIndex == 0) {
@@ -335,17 +448,17 @@ static bool usb_handle_get_descriptor(void) {
 }
 
 /**
- * Handle SET_INTERFACE request: reset the MIDIStreaming bulk endpoints (EP2).
+ * Handle SET_INTERFACE request.
  */
 static void usb_handle_set_interface(void) {
   /* Reset Data Toggle */
   usb_reset_data_toggle(USB_DIR_IN  | 2);
   usb_reset_data_toggle(USB_DIR_OUT | 2);
 
-  /* Unstall the IN endpoint, leave it not-busy (ready to be loaded). */
-  IN2CS = 0;
-
-  /* Unstall the OUT endpoint and arm it to receive */
+  /* Unstall & clear busy flag of all valid IN endpoints */
+  IN2CS = 0 | EPBSY;
+  
+  /* Unstall all valid OUT endpoints, reset bytecounts */
   OUT2CS = 0;
   OUT2BC = 0;
 }
@@ -387,16 +500,16 @@ static void usb_handle_setup_data(void) {
       }
       break;
     case USB_REQ_GET_CONFIGURATION:
-      /* We have only one configuration, return its value (1). */
-      IN0BUF[0] = 1;
+      /* we have only one configuration, return its index */
+      IN0BUF[0] = config_descriptor.bConfigurationValue;
       IN0BC = 1;
       break;
     case USB_REQ_SET_CONFIGURATION:
       /* we have only one configuration -> nothing to do */
       break;
     case USB_REQ_GET_INTERFACE:
-      /* Single alternate setting (0) for every interface. */
-      IN0BUF[0] = 0;
+      /* we have only one interface, return its number */
+      IN0BUF[0] = interface_descriptor00.bInterfaceNumber;
       IN0BC = 1;
       break;
     case USB_REQ_SET_INTERFACE:
@@ -406,9 +519,12 @@ static void usb_handle_setup_data(void) {
       /* Isochronous endpoints not used -> nothing to do */
       break;
     default:
-      /* Class/vendor requests: a class-compliant MIDIStreaming device needs
-       * none, so stall anything non-standard. */
-      STALL_EP0();
+      /* Vendor commands (register read/write). Handle synchronously here in
+       * the SUDAV path - NOT deferred via a semaphore - so the MOVX completes
+       * before EP0CS|=HSNAK ACKs the status stage. A deferred no-data-stage
+       * write would race: the host's next SETUP overwrites setup_data before
+       * the main loop runs, dropping the write. */
+      handle_vendor_command();
       break;
   }
 }
@@ -432,7 +548,7 @@ void usb_init(void) {
 
   /* Enable USB Autovectoring */
   USBBAV |= AVEN;
-
+  
   /* Enable SUDAV interrupt */
   USBIEN |= SUDAVIE;
 
@@ -448,3 +564,4 @@ void usb_init(void) {
   delay_ms(200);
   USBCS = DISCOE | RENUM;
 }
+

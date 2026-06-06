@@ -17,8 +17,20 @@ necessary, taken down — independently.
   on the same port's RHR over a physical MIDI cable). The key unlock was driving
   AN2131 **PB4 low** to de-assert the ST16C454 RESET (active-high); see
   [`doc/bus_write_debug.md`](doc/bus_write_debug.md).
-- Next: a class-compliant USB descriptor + enumeration spike, then wiring the
-  confirmed UART backend behind it.
+- **Phase 2 (class-compliant spike): built, pending hardware bring-up.** The
+  firmware now enumerates as a standard USB Audio Class / MIDIStreaming device
+  (VID `0x0A4E`, PID `0x10C1`) exposing 2 bidirectional cables over one bulk
+  endpoint pair, with a polled bridge between USB-MIDI event packets and the
+  external 16550 UARTs (`uart.c`). Builds with SDCC; the hand-packed descriptor
+  block is validated offline. The on-hardware gate — `snd-usb-audio` binds,
+  `amidi -l` lists the ports, and a per-port `amidi` loopback round-trips on
+  **≥2 ports** — is the remaining step (see [`host/`](host/)).
+- Next (Phase 3): the real RX MIDI parser and all 8 ports;
+  [`firmware/midi_config.h`](firmware/midi_config.h) `NUM_MIDI_PORTS` is the
+  single knob that scales the descriptors + bridge.
+
+The bus-probe is retained as a diagnostic (`make probe`); the spike is the
+default build (`make spike`).
 
 ## Layout
 

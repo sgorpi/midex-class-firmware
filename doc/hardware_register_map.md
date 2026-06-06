@@ -230,12 +230,17 @@ timing scheme and are **not needed** by the class firmware.
 ## MIDEX8 r2 — CY7C646 (FX) + ST16C454 + ST16C452 — Phase 5 (stub)
 
 Firmware: `doc/firmware/midex8r2_combined.bin` (not yet disassembled in depth).
-BOM ([`Midex hardware components.md`](../../../doc/Midex%20hardware%20components.md))
-lists **1× ST16C454 (4) + 1× ST16C452 (2) = 6 external UART channels**, i.e.
-MIDEX8 r2 is likely a **6-port** board (resolves the plan's open question — confirm
-on hardware before finalizing descriptors). External-16550 architecture like r1,
-so the expected delta is: UART base window + 6-port count + the FX init register
-(`0x7FE5`) + FX RAM ceiling `0x1B3F`. Full RE deferred to Phase 5.
+**MIDEX8 r2 has 8 ports** (same as r1), but the BOM
+([`Midex hardware components.md`](../../../doc/Midex%20hardware%20components.md))
+lists only **1× ST16C454 (4) + 1× ST16C452 (2) = 6 external UART channels** — so
+**the last 2 ports must be driven some other way. ❓ Leading hypothesis: the
+EZ-USB FX (CY7C646) on-chip serial** (the FX has on-chip UARTs, the same kind
+MIDEX3 uses). That would make r2 a **hybrid backend**: 6 external-16550 (MOVX,
+like r1) + 2 on-chip-serial. So r2 is **not** a near-mechanical repeat of r1: its
+Phase-5 delta is the external UART base window + the **extra-2-port mechanism**
+(disassemble for SCON/SBUF + 2nd on-chip serial) + FX RAM ceiling `0x1B3F`.
+**Note `0x7FE5` is AUTODATA — present on the AN2131 too, NOT an FX-only init
+register** (re-examine what r2 actually needs). Full RE deferred to Phase 5.
 
 ---
 
