@@ -24,7 +24,10 @@
 	 (uint16_t)(port) * BOARD_UART_STRIDE + (off))))
 
 /* Initialise every channel 0..NUM_MIDI_PORTS-1: 8N1, divisor 1 (31250 baud from
- * the 500 kHz XIN), FIFOs enabled. */
+ * the 500 kHz XIN). The ST16C454 is a 16C450-class part with no FIFO (single-
+ * byte RHR). LCR writes are read-back verified (see uart.c). Call only after the
+ * late UART bring-up releases reset; configuring at power-on is marginal (see
+ * main.c uart_bringup). */
 void uart_init(void);
 
 /* TX: true when the channel's transmit holding register can accept a byte. */

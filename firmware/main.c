@@ -1,5 +1,5 @@
 /*
- * MIDEX8 r1 class-compliant MIDI firmware - Phase 2 spike.
+ * MIDEX8 r1 class-compliant MIDI firmware - Phase 3 (full 8-port build).
  *
  * Enumerates as a standard USB Audio Class / MIDIStreaming device (VID 0x0A4E,
  * PID 0x10C1) with NUM_MIDI_PORTS bidirectional cables, so the OS's generic
@@ -7,12 +7,15 @@
  * polled main loop bridges the single bulk endpoint pair to the external 16550
  * UARTs:
  *
- *   TX (host -> instrument): drain EP2-OUT, decode each 4-byte USB-MIDI event
- *     packet's CIN into a MIDI byte count, and write those bytes to the cable's
- *     UART THR.
- *   RX (instrument -> host): poll each cable's UART LSR; emit every received
- *     byte as a CIN=0xF single-byte passthrough packet on EP2-IN. (The spike
- *     does not parse the RX stream yet; Phase 3 adds a real parser.)
+ *   TX (host -> instrument): bridge_out() decodes each EP2-OUT 4-byte USB-MIDI
+ *     event packet's CIN into a MIDI byte count and pushes those bytes into the
+ *     cable's TX ring, re-arming EP2-OUT immediately; uart_tx_pump() then feeds
+ *     the UARTs from the rings one byte/port per pass (non-blocking). This keeps
+ *     the slow 31250-baud UART from stalling the loop, so bursts aren't lost.
+ *   RX (instrument -> host): midi_rx_pump() (midi_parser.c) polls each cable's
+ *     UART and reassembles the raw byte stream into properly framed USB-MIDI
+ *     event packets (running status, channel/system-common lengths, SysEx, and
+ *     real-time bytes -> correct CINs) on EP2-IN.
  *
  * Bring-up (board_init) and the UART register map are the hardware-validated
  * Phase-1 findings; see ../doc/hardware_register_map.md. Enumeration scaffolding
@@ -25,6 +28,7 @@
 #include "board_r1.h"
 #include "uart.h"
 #include "midi_config.h"
+#include "midi_parser.h"
 
 /*
  * All ISRs must be declared (with __interrupt) in the module that contains
@@ -94,12 +98,16 @@ static void board_init(void)
 	 * as stock. */
 	CKCON &= ~0x27;
 
-	/* PB4 = ST16C454 RESET (active-high). Drive it LOW to release the UARTs
-	 * from reset: PB4=GPIO, latch 0, then enable the output driver. THIS is the
-	 * Phase-1 unlock without which external writes never land. */
+	/* PB4 = ST16C454 RESET (active-high). Prepare it as a GPIO with the output
+	 * latch low, but DO NOT drive it yet -- leave PB4 high-Z (pulled high) so
+	 * the UARTs stay IN RESET through power-on and USB enumeration. They are
+	 * released and configured later by uart_bringup(), once the external write
+	 * glue has settled. (Stock does the same: PB4 stays high-Z until the host's
+	 * START command, which then drives it low and runs uart_init.) Releasing +
+	 * configuring at boot is marginal -- one channel intermittently fails to
+	 * latch its LCR (comes up in 5-bit mode) and corrupts that port. */
 	PORTBCFG &= ~INT4;   /* PB4 = GPIO (clear INT4 alt-function) */
-	OUTB     &= ~OUTB4;  /* PB4 output latch = 0 */
-	OEB      |=  OEB4;   /* PB4 = driven output -> RESET de-asserted */
+	OUTB     &= ~OUTB4;  /* PB4 output latch = 0 (drives RESET low once enabled) */
 
 	/* 0xFE00.. is external SRAM bookkeeping (not a UART latch). Retained to
 	 * match the bring-up state the Phase-1 loopback validated; not load-bearing. */
@@ -108,8 +116,50 @@ static void board_init(void)
 	*((__xdata uint8_t *)0xFE01) = 0x10;
 }
 
-/* Host -> instrument: decode EP2-OUT USB-MIDI packets to UART THR writes. */
-static void bridge_tx(void)
+/*
+ * Per-port host->device TX ring buffers. EP2-OUT is decoded into these and the
+ * endpoint re-armed immediately (bridge_out); uart_tx_pump then feeds the
+ * 31250-baud UARTs from them one byte per loop pass, non-blocking. This is the
+ * fix for the burst-loss bug: the old bridge busy-waited on the slow UART while
+ * draining a packet, which starved midi_rx_pump and dropped looped-back bursts
+ * (chords / running status / multi-packet SysEx collapsed to their last packet).
+ */
+static __xdata uint8_t tx_ring[NUM_MIDI_PORTS][MIDI_TX_RING_SIZE];
+static __xdata uint8_t tx_head[NUM_MIDI_PORTS];   /* write index */
+static __xdata uint8_t tx_tail[NUM_MIDI_PORTS];   /* read index  */
+
+/* Resume offset into OUT2BUF when a packet didn't fit and we left EP2-OUT
+ * un-rearmed for back-pressure (the host NAKs until the rings drain). */
+static uint8_t out_off;
+
+#define TX_RING_MASK (MIDI_TX_RING_SIZE - 1)
+
+/* Zero the TX ring state. XDATA is NOT auto-initialised on this target (same
+ * reason midi_parser_reset exists), so without this the garbage head/tail make
+ * uart_tx_pump believe ports have data and spew continuously (stuck OUT LEDs). */
+static void tx_reset(void)
+{
+	uint8_t p;
+
+	for (p = 0; p < NUM_MIDI_PORTS; p++) {
+		tx_head[p] = 0;
+		tx_tail[p] = 0;
+	}
+	out_off = 0;
+}
+
+/* Free space in port p's ring (one slot reserved to distinguish full/empty). */
+static uint8_t tx_room(uint8_t p)
+{
+	return (uint8_t)(TX_RING_MASK -
+			 ((uint8_t)(tx_head[p] - tx_tail[p]) & TX_RING_MASK));
+}
+
+/* Host -> instrument: decode EP2-OUT USB-MIDI packets into the per-port TX
+ * rings, then re-arm EP2-OUT. Applies back-pressure: if a cable's ring can't
+ * hold the packet, stop and leave the endpoint un-rearmed so it is retried
+ * (from out_off, no duplication) once uart_tx_pump has drained room. */
+static void bridge_out(void)
 {
 	uint8_t n, i, j, len, cn;
 
@@ -117,65 +167,86 @@ static void bridge_tx(void)
 		return;
 
 	n = OUT2BC;                         /* bytes the host sent this packet */
-	for (i = 0; (uint8_t)(i + 4) <= n; i += 4) {
+	for (i = out_off; (uint8_t)(i + 4) <= n; i += 4) {
 		cn  = OUT2BUF[i] >> 4;          /* cable number = high nibble       */
 		len = cin_len[OUT2BUF[i] & 0x0F];
-		if (cn >= NUM_MIDI_PORTS)
-			continue;                   /* no such cable -> drop            */
+		if (cn >= NUM_MIDI_PORTS || len == 0)
+			continue;                   /* no such cable / no data -> drop  */
+		if (tx_room(cn) < len) {
+			out_off = i;                /* ring full: resume here next pass */
+			return;                     /* leave EP un-rearmed (host NAKs)  */
+		}
 		for (j = 0; j < len; j++) {
-			while (!uart_tx_ready(cn))
-				;                        /* wait for THR empty (drains at baud) */
-			uart_putc(cn, OUT2BUF[i + 1 + j]);
+			tx_ring[cn][tx_head[cn]] = OUT2BUF[i + 1 + j];
+			tx_head[cn] = (tx_head[cn] + 1) & TX_RING_MASK;
 		}
 	}
 
+	out_off = 0;
 	Semaphore_EP2_out = 0;
 	OUT2BC = 0;                         /* re-arm EP2-OUT to receive again  */
 }
 
-/* Instrument -> host: poll each cable's UART, emit single-byte EP2-IN packets. */
-static void bridge_rx(void)
+/* Drain each port's TX ring to its UART: at most one byte per port per pass
+ * (gated by THRE), so the loop never blocks on the slow UART. */
+static void uart_tx_pump(void)
 {
-	uint8_t count = 0;
 	uint8_t p;
 
-	/* Only load a new IN packet once the previous one has been collected. */
-	if (IN2CS & EPBSY)
-		return;
-
 	for (p = 0; p < NUM_MIDI_PORTS; p++) {
-		while (uart_rx_ready(p) && count <= (MIDI_EP_MAXPKT - 4)) {
-			uint8_t b = uart_getc(p);
-			IN2BUF[count++] = (p << 4) | 0x0F;  /* CN=p, CIN=0xF single byte */
-			IN2BUF[count++] = b;
-			IN2BUF[count++] = 0;
-			IN2BUF[count++] = 0;
+		if (tx_head[p] != tx_tail[p] && uart_tx_ready(p)) {
+			uart_putc(p, tx_ring[p][tx_tail[p]]);
+			tx_tail[p] = (tx_tail[p] + 1) & TX_RING_MASK;
 		}
 	}
+}
 
-	if (count)
-		IN2BC = count;                  /* ship it (sets EPBSY)             */
+/* Release the ST16C454s from reset and configure them. Deferred until after USB
+ * enumeration (see board_init): doing it at power-on is marginal -- the external
+ * 0x40xx write glue (PAL16V8/74HC138/74HC123) doesn't reliably latch yet, and a
+ * channel comes up in 5-bit mode. Stock and the bus-probe both configure late
+ * and never hit this. */
+static void uart_bringup(void)
+{
+	delay_ms(BOARD_UART_BRINGUP_DELAY_MS);  /* let the write glue settle    */
+	OEB |= OEB4;                            /* drive PB4 low: RESET released */
+	delay_ms(1);                            /* ST16C454 reset-recovery       */
+	uart_init();                            /* 8N1, divisor 1, verified      */
 }
 
 void main(void)
 {
-	/* Bring up the external UART bus + clock, then init the 16550 channels. */
+	/* Bring up the external-memory bus + UART clock (UARTs stay in reset). */
 	board_init();
-	uart_init();
 
 	/* usb_init() performs RENUM re-enumeration: the device drops off the bus
-	 * and reappears as 0x0A4E:0x10C1, a class-compliant MIDIStreaming device. */
+	 * and reappears as 0x0A4E:0x10C1, a class-compliant MIDIStreaming device.
+	 * It also runs ISODISAB, which frees the isochronous-EP buffer RAM at
+	 * 0x2000 for use as XDATA -- exactly where our TX/RX rings + parser state
+	 * live. So the ring/parser state MUST be zeroed AFTER this: doing it before
+	 * lets enumeration's iso-buffer activity clobber the indices with garbage,
+	 * which made uart_tx_pump spew (stuck OUT LEDs) and corrupt early RX. */
 	usb_init();
 
 	/* Global interrupt enable - without this SUDAV never fires and enumeration
 	 * times out. */
 	EA = 1;
 
+	/* Now that the iso-buffer XDATA is freed, initialise the ring/parser state
+	 * (XDATA is not auto-zeroed on this target). */
+	tx_reset();
+	midi_parser_reset();
+
+	/* Now that power/clock/enumeration have settled, release the UART reset and
+	 * configure the channels (see uart_bringup). */
+	uart_bringup();
+
 	/* Arm EP2-OUT to receive the first host packet (in case no SET_INTERFACE). */
 	OUT2BC = 0;
 
 	while (1) {
-		bridge_tx();
-		bridge_rx();
+		bridge_out();      /* EP2-OUT -> per-port TX rings (re-arm fast)   */
+		uart_tx_pump();    /* TX rings -> UARTs, one byte/port, non-blocking*/
+		midi_rx_pump();    /* UARTs -> parse -> EP2-IN                      */
 	}
 }

@@ -398,3 +398,26 @@ and `D0–D7` during a single hammered write is the definitive tool (the plan's
 declined escape hatch). The bus-probe has already de-risked the rest: the read
 map is confirmed and the firmware is known-good up to this one strobe-delivery
 question.
+
+## Phase-3 sequel: the write glue is also marginal AT POWER-ON (2026-06-06)
+
+A second, related symptom surfaced in the Phase-3 class firmware (8-port init):
+**exactly one channel would come up with its `LCR` stuck at the reset default
+`0x00` (5-bit) instead of `0x03`**, corrupting that port (`0x90`→`0x10`). The
+victim was deterministic for a given build but *moved* between builds (port 2 →
+3 → 1) as the init code/timing changed, and read-back retry could not repair it
+(re-running the identical sequence re-hit the identical bad window). On-device
+`LCR` readback confirmed the value; the bus-probe round-tripped the same channel
+perfectly. ⇒ the same marginal `0x40xx` write glue (PAL16V8 + 74HC138 +
+74HC123), this time failing **only when written right at power-on**.
+
+The tell: every *working* reference configures the UARTs **late**, never at boot
+— stock runs `uart_init_all_ports` at the host **START (0xFD)** command (long
+after enumeration), and the bus-probe is driven from the host over EP0 well
+after boot. **Fix (firmware/main.c):** `board_init` now leaves the ST16C454s in
+RESET (PB4 high-Z) through power-on and USB enumeration; `uart_bringup()` then
+waits `BOARD_UART_BRINGUP_DELAY_MS` (100 ms), drives PB4 low, and runs
+`uart_init`. With the deferred bring-up, all 8 channels latch `LCR=0x03` on the
+first pass and every port round-trips. Matching stock's exact `TR2` clock-stop
+init sequence at boot did **not** help — it is the *timing relative to power-on*,
+not the clock state during the writes.

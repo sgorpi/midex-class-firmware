@@ -28,7 +28,8 @@
 #define UART_DLL  0   /* divisor latch low  (DLAB=1)                       */
 #define UART_DLM  1   /* divisor latch high (DLAB=1)                       */
 #define UART_IER  1   /* interrupt enable (DLAB=0) - left 0, polled        */
-#define UART_FCR  2   /* FIFO control (write)                              */
+/* offset 2: ISR on read, no register on write. The ST16C454 is a 16C450-class
+ * part with NO FIFO (datasheet Table 4: 12 registers, no FCR/IIR-FIFO). */
 #define UART_LCR  3   /* line control                                      */
 #define UART_MCR  4   /* modem control                                     */
 #define UART_LSR  5   /* line status                                       */
@@ -45,9 +46,15 @@
 #define BOARD_UART_LCR_DLAB  0x83   /* DLAB=1 | 8N1                         */
 #define BOARD_UART_LCR_8N1   0x03   /* DLAB=0 | 8N1                         */
 #define BOARD_UART_DIVISOR   1
-/* Stock firmware leaves FIFOs OFF. Our firmware may enable them:
- * FCR = 0x07 (FIFO enable + RX reset + TX reset). Optional improvement.   */
-#define BOARD_UART_FCR_ENABLE 0x07
+/* Read-back retry cap for each LCR write in uart_init (defensive against any
+ * residual marginal write; normally latches first try with the late bring-up). */
+#define BOARD_UART_LCR_MAX_TRIES 50
+
+/* Delay (ms) after enumeration before releasing UART RESET + running uart_init.
+ * The 0x40xx write glue is marginal right at power-on (a channel comes up in
+ * 5-bit mode); stock and the bus-probe both configure the UARTs well after
+ * boot. Deferring past power-on is the actual fix. See main.c uart_bringup(). */
+#define BOARD_UART_BRINGUP_DELAY_MS 100
 
 /* ---- External-bus + UART-clock bring-up (see board_init in main.c) ----- */
 /* These MUST be programmed before any UART access or reads ghost the bus.   */

@@ -99,4 +99,4 @@ Both remaining items are closed:
 
 ⇒ Enumeration, `snd-usb-audio` binding, port listing, and ≥2-port MIDI
 round-trip all verified. **Ready for Phase 3** (real MIDI parser + scale
-`NUM_MIDI_PORTS` 2→8).
+`NUM_MIDI_PORTS` 2→8) — now built; see [phase3_build.md](phase3_build.md).

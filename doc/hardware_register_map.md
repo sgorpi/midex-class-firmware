@@ -117,9 +117,22 @@ bus-probe cannot reach SFRs).
 > pin 6 → ST16C454 pin 37 (RESET) → AN2131 PB4. The ST16C454 RESET is **active
 > high**, so PB4 must be **driven low** for the chip to operate. This single step
 > turned the long-standing "external writes never land" failure (see
-> [bus_write_debug.md](bus_write_debug.md)) into a working MIDI loopback. Our
-> firmware does all three writes (`PORTBCFG`/`OUTB`/`OEB`) once at `board_init`,
-> since the class firmware has no separate START/STOP control phase.
+> [bus_write_debug.md](bus_write_debug.md)) into a working MIDI loopback.
+>
+> **⚠ TIMING (Phase-3, 2026-06-06): release RESET + run `uart_init` LATE, not at
+> `board_init`.** Stock drives `OEB.4` and calls `uart_init_all_ports` only on the
+> host START (`0xFD`) cmd — i.e. **after** USB enumeration — keeping the UARTs in
+> reset (PB4 high-Z) from power-on until then. That lateness is load-bearing: the
+> `0x40xx` write glue (PAL16V8/74HC138/74HC123) is **marginal right at power-on**,
+> where a channel intermittently fails to latch its `LCR` (comes up `0x00` = 5-bit,
+> corrupting that port, `0x90`→`0x10`). The first class build did
+> `PORTBCFG`/`OUTB`/`OEB` **and** `uart_init` at `board_init` and hit exactly that
+> (one dead channel, victim moving with code timing; retry/verify and stock's
+> `TR2` clock-stop did **not** help). **Fix:** `board_init` does only
+> `PORTBCFG.4=0`/`OUTB.4=0` (PB4 stays high-Z = in reset); a deferred
+> `uart_bringup()` (after USB up + `BOARD_UART_BRINGUP_DELAY_MS`=100 ms) sets
+> `OEB.4` then runs `uart_init`. All 8 channels then latch on the first pass.
+> Full chase: [phase3_build.md](phase3_build.md) + [bus_write_debug.md](bus_write_debug.md).
 
 ### 3. MIDI data path ✅
 

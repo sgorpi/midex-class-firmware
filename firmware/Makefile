@@ -42,9 +42,9 @@ CFLAGS  = --std-sdcc99 --opt-code-size --model-small
 LDFLAGS = --code-loc 0x0000 --code-size $(CODE_SIZE) --xram-loc $(XRAM_LOC) \
           --xram-size $(XRAM_SIZE) --iram-size 256 --model-small
 
-SPIKE_OBJECTS = main.rel usb.rel usb_descriptors.rel uart.rel delay.rel USBJmpTb.rel
+SPIKE_OBJECTS = main.rel usb.rel usb_descriptors.rel uart.rel midi_parser.rel delay.rel USBJmpTb.rel
 PROBE_OBJECTS = main_probe.rel usb_probe.rel delay.rel USBJmpTb.rel
-HEADERS = usb.h common.h delay.h reg_ezusb.h io.h board_r1.h uart.h midi_config.h
+HEADERS = usb.h common.h delay.h reg_ezusb.h io.h board_r1.h uart.h midi_config.h midi_parser.h
 
 .SUFFIXES:
 .PHONY: all spike probe clean hex

@@ -1,6 +1,6 @@
 /*
  * usb_descriptors.c - USB Audio Class 1.0 / MIDIStreaming descriptors for the
- * class-compliant MIDEX8 firmware (Phase 2 spike, NUM_MIDI_PORTS cables).
+ * class-compliant MIDEX8 firmware (Phase 3 full build, NUM_MIDI_PORTS cables).
  *
  * The device exposes one AudioControl interface (no units) plus one
  * MIDIStreaming interface carrying NUM_MIDI_PORTS bidirectional cables over a
@@ -26,10 +26,13 @@
 #include "usb.h"
 #include "midi_config.h"
 
-/* The 2-port descriptor below is hand-unrolled. Phase 3 (8 ports) extends the
- * jack list + endpoint assoc arrays and bumps the length constants. */
-#if NUM_MIDI_PORTS != 2
-#error "usb_descriptors.c is hand-packed for 2 ports; extend it for Phase 3."
+/* The jack list and endpoint association arrays below are hand-unrolled for the
+ * r1 port count (8). The length constants derive from NUM_MIDI_PORTS, and the
+ * config_block_len_check at the bottom verifies the array matches them; if you
+ * change NUM_MIDI_PORTS you must also add/remove the matching MIDI_PORT_JACKS()
+ * entries and baAssocJackID bytes. */
+#if NUM_MIDI_PORTS != 8
+#error "usb_descriptors.c is hand-packed for 8 ports; adjust the jack list."
 #endif
 
 #define ID_VENDOR   0x0A4E   /* Steinberg                                     */
@@ -54,12 +57,28 @@
 #define DESC_MIDI_OUT_JACK(jtype, id, srcid) \
 	9, DSC_CS_INTERFACE, MS_SUB_MIDI_OUT, (jtype), (id), 1, (srcid), 1, 0
 
-/* Length constants (recomputed if NUM_MIDI_PORTS changes). 2 ports:
+/* The four jacks for port p (0-based): ids 4p+1..4p+4 (see file header for the
+ * Embedded/External wiring). 30 bytes per port (6+6+9+9). */
+#define MIDI_PORT_JACKS(p) \
+	DESC_MIDI_IN_JACK(JACK_EMBEDDED, 4*(p)+1), \
+	DESC_MIDI_IN_JACK(JACK_EXTERNAL, 4*(p)+2), \
+	DESC_MIDI_OUT_JACK(JACK_EMBEDDED, 4*(p)+3, 4*(p)+2), /* src = External IN */ \
+	DESC_MIDI_OUT_JACK(JACK_EXTERNAL, 4*(p)+4, 4*(p)+1)  /* src = Embedded IN */
+
+/* Per-port descriptor sizes used to compute the totals below. */
+#define JACKS_PER_PORT_LEN   30   /* 6 + 6 + 9 + 9                            */
+#define CS_EP_LEN(n)         (4 + (n))  /* MS_GENERAL header + n jack IDs     */
+
+/* Length constants, derived from NUM_MIDI_PORTS (config_block_len_check guards
+ * them):
  *   config 9 + std-AC-if 9 + cs-AC-hdr 9 + std-MS-if 9 + cs-MS-hdr 7
- *   + jacks 2*(6+6+9+9)=60 + std-OUT-EP 9 + cs-OUT-EP 6 + std-IN-EP 9 + cs-IN-EP 6 */
-#define CONFIG_TOTAL_LEN   133
-/* CS MS-interface-header wTotalLength = header(7) + all jack descriptors(60). */
-#define MS_TOTAL_LEN       67
+ *   + jacks N*30 + std-OUT-EP 9 + cs-OUT-EP (4+N) + std-IN-EP 9 + cs-IN-EP (4+N) */
+#define CONFIG_TOTAL_LEN \
+	(9 + 9 + 9 + 9 + 7 + (NUM_MIDI_PORTS) * JACKS_PER_PORT_LEN \
+	 + 9 + CS_EP_LEN(NUM_MIDI_PORTS) + 9 + CS_EP_LEN(NUM_MIDI_PORTS))
+/* CS MS-interface-header wTotalLength = header(7) + all jack descriptors. */
+#define MS_TOTAL_LEN \
+	(7 + (NUM_MIDI_PORTS) * JACKS_PER_PORT_LEN)
 
 __code struct usb_device_descriptor device_descriptor = {
 	/* .bLength            = */ sizeof(struct usb_device_descriptor),
@@ -119,17 +138,15 @@ __code uint8_t config_block[CONFIG_TOTAL_LEN] = {
 	0x00, 0x01,                            /* bcdMSC 1.00                      */
 	(MS_TOTAL_LEN & 0xff), (MS_TOTAL_LEN >> 8), /* wTotalLength (hdr + jacks)  */
 
-	/* --- Port 0 jacks (ids 1..4) --- */
-	DESC_MIDI_IN_JACK(JACK_EMBEDDED, 1),
-	DESC_MIDI_IN_JACK(JACK_EXTERNAL, 2),
-	DESC_MIDI_OUT_JACK(JACK_EMBEDDED, 3, 2),   /* src = External IN (2)        */
-	DESC_MIDI_OUT_JACK(JACK_EXTERNAL, 4, 1),   /* src = Embedded IN (1)        */
-
-	/* --- Port 1 jacks (ids 5..8) --- */
-	DESC_MIDI_IN_JACK(JACK_EMBEDDED, 5),
-	DESC_MIDI_IN_JACK(JACK_EXTERNAL, 6),
-	DESC_MIDI_OUT_JACK(JACK_EMBEDDED, 7, 6),
-	DESC_MIDI_OUT_JACK(JACK_EXTERNAL, 8, 5),
+	/* --- Per-port jacks: port p -> ids 4p+1..4p+4 (8 ports, ids 1..32) --- */
+	MIDI_PORT_JACKS(0),
+	MIDI_PORT_JACKS(1),
+	MIDI_PORT_JACKS(2),
+	MIDI_PORT_JACKS(3),
+	MIDI_PORT_JACKS(4),
+	MIDI_PORT_JACKS(5),
+	MIDI_PORT_JACKS(6),
+	MIDI_PORT_JACKS(7),
 
 	/* --- Standard bulk OUT endpoint (9, audio-class layout) --- */
 	9, USB_DESCRIPTOR_TYPE_ENDPOINT,
@@ -140,11 +157,12 @@ __code uint8_t config_block[CONFIG_TOTAL_LEN] = {
 	0,                    /* bRefresh (audio EP descriptor)                    */
 	0,                    /* bSynchAddress                                     */
 
-	/* --- Class-specific bulk OUT endpoint (4 + 2): embedded MIDI IN jacks --- */
-	6, DSC_CS_ENDPOINT,
+	/* --- Class-specific bulk OUT endpoint (4 + N): embedded MIDI IN jacks --- */
+	CS_EP_LEN(NUM_MIDI_PORTS), DSC_CS_ENDPOINT,
 	MS_SUB_HEADER,        /* MS_GENERAL                                        */
-	2,                    /* bNumEmbMIDIJack                                   */
-	1, 5,                 /* baAssocJackID: cable 0 -> jack 1, cable 1 -> jack 5 */
+	NUM_MIDI_PORTS,       /* bNumEmbMIDIJack                                   */
+	/* baAssocJackID: cable p -> Embedded IN jack 4p+1 (ids 1,5,9,..,29)      */
+	1, 5, 9, 13, 17, 21, 25, 29,
 
 	/* --- Standard bulk IN endpoint (9) --- */
 	9, USB_DESCRIPTOR_TYPE_ENDPOINT,
@@ -153,11 +171,12 @@ __code uint8_t config_block[CONFIG_TOTAL_LEN] = {
 	(MIDI_EP_MAXPKT & 0xff), (MIDI_EP_MAXPKT >> 8),
 	0, 0, 0,
 
-	/* --- Class-specific bulk IN endpoint (6): embedded MIDI OUT jacks --- */
-	6, DSC_CS_ENDPOINT,
+	/* --- Class-specific bulk IN endpoint (4 + N): embedded MIDI OUT jacks --- */
+	CS_EP_LEN(NUM_MIDI_PORTS), DSC_CS_ENDPOINT,
 	MS_SUB_HEADER,
-	2,                    /* bNumEmbMIDIJack                                   */
-	3, 7                  /* baAssocJackID: cable 0 -> jack 3, cable 1 -> jack 7 */
+	NUM_MIDI_PORTS,       /* bNumEmbMIDIJack                                   */
+	/* baAssocJackID: cable p -> Embedded OUT jack 4p+3 (ids 3,7,11,..,31)    */
+	3, 7, 11, 15, 19, 23, 27, 31
 };
 
 /* Build-time guard: the array length must equal the wTotalLength we advertise. */

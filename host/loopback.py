@@ -55,16 +55,18 @@ def xwrite(dev, addr, val):
                       data_or_wLength=0)
 
 
-def uart_init(dev, port):
+def uart_init(dev, port, fcr=0x00):
     """8N1, divisor 1 (500 kHz XIN / 16 = 31250 baud = MIDI). No internal
-    loopback (MCR=0), interrupts off (IER=0), FIFOs off (16450 mode)."""
+    loopback (MCR=0), interrupts off (IER=0). FIFOs per `fcr`: 0x00 = off
+    (16450 mode, the default), 0x07 = FIFO enable + RX/TX reset (what the class
+    firmware uses)."""
     b = base(port)
     xwrite(dev, b + LCR, 0x80)      # DLAB=1 to reach divisor latches
     xwrite(dev, b + DLL, 0x01)
     xwrite(dev, b + DLM, 0x00)
     xwrite(dev, b + LCR, 0x03)      # DLAB=0, 8 data bits, no parity, 1 stop
     xwrite(dev, b + IER, 0x00)
-    xwrite(dev, b + FCR, 0x00)
+    xwrite(dev, b + FCR, fcr)
     xwrite(dev, b + MCR, 0x00)      # bit4=0 -> NOT internal loopback
 
 
@@ -77,10 +79,19 @@ def drain_rx(dev, port):
 
 
 def main():
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8
+    # Optional "--fcr 0xNN" anywhere in argv (default 0x00 = FIFOs off). Use
+    # 0x07 to reproduce the class firmware's FIFO-enabled init on the probe.
+    fcr = 0x00
+    argv = sys.argv[1:]
+    if "--fcr" in argv:
+        k = argv.index("--fcr")
+        fcr = int(argv[k + 1], 0)
+        del argv[k:k + 2]
+    port = int(argv[0]) if argv else 8
     if not 1 <= port <= 8:
         print("port must be 1..8")
         sys.exit(1)
+    print(f"(UART FCR = 0x{fcr:02X} -> FIFOs {'ON' if fcr & 1 else 'OFF'})")
 
     dev = cast(Any, usb.core.find(idVendor=VID, idProduct=PID))
     if dev is None:
@@ -94,7 +105,7 @@ def main():
 
     print(f"Init all 8 channels (8N1/31250)...")
     for p in range(1, 9):
-        uart_init(dev, p)
+        uart_init(dev, p, fcr)
         drain_rx(dev, p)
 
     # Confirm the line-control register actually stuck (a real RW register,
