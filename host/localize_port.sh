@@ -28,7 +28,7 @@ DUR=8
 
 LSUSB_LINE="$(lsusb -d "$PID" | head -n1)"
 if [ -z "$LSUSB_LINE" ]; then
-	echo "No $PID firmware found. Upload midex-spike-r1.ihx first." >&2
+	echo "No $PID firmware found. Upload midex-class-r1.ihx first." >&2
 	exit 1
 fi
 BUS="$(printf '%s\n' "$LSUSB_LINE" | sed -E 's/^Bus ([0-9]+) Device ([0-9]+):.*/\1/')"

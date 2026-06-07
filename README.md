@@ -32,11 +32,11 @@ necessary, taken down — independently.
   single knob that scales the descriptors + bridge.
 
 The bus-probe is retained as a diagnostic (`make probe`); the spike is the
-default build (`make spike`).
+default build (`make class`).
 
 ## Performance
 
-Measured on a physical MIDEX8 **r1** running `firmware/midex-spike-r1.ihx`, via
+Measured on a physical MIDEX8 **r1** running `firmware/midex-class-r1.ihx`, via
 the ALSA-rawmidi harness ([`host/e2e_test.py`](host/e2e_test.py)) with MIDI
 loopback cables (DIN OUT→IN) on the tested ports. The UART line rate is the hard
 limit: 31250 baud ÷ 10 bits ÷ 3 bytes ≈ **~1040 three-byte messages/s per port**.

@@ -1,0 +1,25 @@
+# Auto-upload the class-compliant MIDI firmware when a loader-PID MIDEX appears.
+#
+# A bare MIDEX (no RAM firmware) enumerates as a loader PID:
+#   0x1000  MIDEX8 r1 (AN2131)   0x1010  MIDEX8 r2 (CY7C646 FX)   0x1100  MIDEX3
+# We do NOT run the (multi-second, re-enumerating) libusb upload directly from
+# RUN+= here: udev reaps RUN+= children after a timeout and forbids long-running
+# processes. Instead we hand off to a systemd oneshot (midex-upload@.service),
+# which owns the upload in its own cgroup. See host/README.md for the rationale
+# and a RUN+= fallback for setups without systemd.
+#
+# Install: host/midex-fwctl.sh install   (then `... class` to activate this path)
+
+ACTION!="add",            GOTO="midex_class_end"
+SUBSYSTEM!="usb",         GOTO="midex_class_end"
+ATTR{idVendor}!="0a4e",   GOTO="midex_class_end"
+
+ATTR{idProduct}=="1000",  GOTO="midex_class_up"
+ATTR{idProduct}=="1010",  GOTO="midex_class_up"
+ATTR{idProduct}=="1100",  GOTO="midex_class_up"
+GOTO="midex_class_end"
+
+LABEL="midex_class_up"
+TAG+="systemd", ENV{SYSTEMD_WANTS}+="midex-upload@$kernel.service"
+
+LABEL="midex_class_end"

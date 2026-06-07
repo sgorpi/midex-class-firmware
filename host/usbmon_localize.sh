@@ -29,7 +29,7 @@ DUR=8
 # --- discover the MIDEX: bus, device address, and an ALSA port -----------------
 LSUSB_LINE="$(lsusb -d 0a4e:10c1 | head -n1)"
 if [ -z "$LSUSB_LINE" ]; then
-	echo "No 0a4e:10c1 (spike firmware) found. Upload midex-spike-r1.ihx first." >&2
+	echo "No 0a4e:10c1 (spike firmware) found. Upload midex-class-r1.ihx first." >&2
 	exit 1
 fi
 BUS="$(printf '%s\n' "$LSUSB_LINE" | sed -E 's/^Bus ([0-9]+) Device ([0-9]+):.*/\1/')"

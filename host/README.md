@@ -41,29 +41,65 @@ sudo ./build/midex-fw-upload -d 0a4e:1000 firmware.ihx
 `NO_DEVICE` on the final `CPUCS=0` is **expected and treated as success**: the
 8051 boots and the device re-enumerates before libusb finishes the round-trip.
 
-### Linux caveat — the in-tree driver auto-uploads stock firmware
+## Installing on Linux — choosing the firmware path
 
-If `snd-usb-midex` is loaded, it will see the loader PID on power-up and upload
-the **stock** firmware before this tool can grab the device. While testing
-custom firmware, unbind/blacklist it:
+The MIDEX has **no RAM firmware at power-up**, so whatever claims the loader-PID
+device first decides what it becomes. Two paths compete:
+
+- **class** (this project): our uploader streams the class-compliant firmware →
+  the device re-enumerates as a standard USB-MIDI device and the inbox
+  `snd-usb-audio` driver binds, no custom code.
+- **stock** (parent project): the in-tree `snd_usb_midex` driver sees the loader
+  PID and uploads Steinberg's **proprietary** firmware, which it then drives over
+  its vendor protocol.
+
+If both are active they race for the device, so pick one. The helper script
+[`midex-fwctl.sh`](midex-fwctl.sh) installs the pieces and flips between paths:
 
 ```sh
-sudo modprobe -r snd_usb_midex          # or blacklist it
+cmake -S . -B build && cmake --build build     # build the uploader first
+make -C ../firmware class                        # build the firmware .ihx
+
+sudo ./midex-fwctl.sh install     # copy uploader, firmware, udev rule, systemd unit
+sudo ./midex-fwctl.sh class       # use the class-compliant firmware
+sudo ./midex-fwctl.sh stock       # switch back to the original Steinberg firmware
+sudo ./midex-fwctl.sh status      # show what's installed and which path is active
 ```
 
-### Optional: udev rule (auto-upload on plug)
+After `class`/`stock`, **power-cycle the MIDEX** so it re-enters its loader PID
+and the selected path claims it. `class` blacklists `snd_usb_midex` and arms the
+upload unit; `stock` removes the blacklist and masks the unit so a stray plug
+event cannot re-flash the device.
 
-To upload automatically when a loader-PID device appears, drop a rule like
-`/etc/udev/rules.d/99-midex-class.rules`:
+### Why a systemd unit and not just `RUN+=`
+
+The upload takes a couple of seconds and the device **re-enumerates** mid-way.
+`udev` reaps `RUN+=` child processes after a short timeout and explicitly forbids
+long-running processes, so a direct `RUN+=` upload can be killed mid-transfer.
+The installed rule ([`install/99-midex-class.rules`](install/99-midex-class.rules))
+therefore only **tags** the device and hands off to a oneshot
+([`install/midex-upload@.service`](install/midex-upload@.service)) that owns the
+upload in its own cgroup.
+
+On a system **without systemd**, a direct `RUN+=` rule is the pragmatic fallback
+(accepting the reap-timeout caveat); replace the tag/hand-off lines with:
 
 ```udev
 ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0a4e", \
-  ATTR{idProduct}=="1000", RUN+="/usr/local/bin/midex-fw-upload /usr/local/lib/midex/midex-class-r1.ihx"
+  ATTR{idProduct}=="1000", \
+  RUN+="/usr/local/bin/midex-fw-upload /usr/local/lib/midex/midex-class-r1.ihx"
+# (repeat for idProduct 1010 = r2, 1100 = MIDEX3)
 ```
 
-After our firmware boots it enumerates as a standard USB-MIDI device and the
-inbox `snd-usb-audio` (Linux) / `usbaudio.sys` (Windows) / `AppleUSBAudio`
-(macOS) driver binds with zero custom code.
+### Manual / one-shot upload
+
+You can always skip the rule and upload by hand (see **Use** above). To stop the
+stock driver grabbing the device for a single test:
+
+```sh
+sudo modprobe -r snd_usb_midex
+sudo ./build/midex-fw-upload ../firmware/midex-class-r1.ihx
+```
 
 ### Zero-code Linux alternative: fxload
 
@@ -79,7 +115,7 @@ where `fxload` is unavailable.
 
 ## Testing the class-compliant spike
 
-After uploading `midex-spike-r1.ihx`, the device enumerates as a standard
+After uploading `midex-class-r1.ihx`, the device enumerates as a standard
 USB-MIDI device (PID `0x10C1`) and `snd-usb-audio` binds — no custom protocol.
 [`spike_loopback.py`](spike_loopback.py) drives the Phase-2 gate over ALSA
 `amidi`: it discovers the MIDEX ports and round-trips a SysEx on each.

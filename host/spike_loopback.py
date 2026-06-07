@@ -17,7 +17,7 @@ them to return.
                                    #   message (discriminates first-packet vs
                                    #   per-message vs SysEx-specific loss)
 
-Prereqs: upload midex-spike-r1.ihx, confirm `amidi -l` lists the ports, and patch
+Prereqs: upload midex-class-r1.ihx, confirm `amidi -l` lists the ports, and patch
 a MIDI cable OUT->IN on each port under test. `amidi` ships with alsa-utils; no
 root needed if your user can access the sound devices.
 """
@@ -120,7 +120,7 @@ def main():
 
     if not ports:
         print(f"No MIDEX ports found (matching '{args.match}'). Upload "
-              f"midex-spike-r1.ihx and check `amidi -l`.", file=sys.stderr)
+              f"midex-class-r1.ihx and check `amidi -l`.", file=sys.stderr)
         sys.exit(1)
     if args.num and len(ports) < args.num:
         print(f"Found {len(ports)} port(s), need {args.num}.", file=sys.stderr)

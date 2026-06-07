@@ -1,0 +1,19 @@
+# Oneshot that uploads the class-compliant MIDI firmware into a loader-PID MIDEX.
+#
+# Triggered (not enabled) by udev: 99-midex-class.rules sets SYSTEMD_WANTS on the
+# device, so systemd starts one instance per appearing device. The instance name
+# (%i) is the USB device's kernel name (e.g. 1-2) and only keeps the units
+# distinct; the uploader itself auto-detects the loader-PID device.
+#
+# To switch back to the stock vendor firmware, mask this unit and let the
+# in-tree snd_usb_midex driver claim the device instead:
+#   host/midex-fwctl.sh stock     (masks this unit, unblacklists snd_usb_midex)
+
+[Unit]
+Description=Upload class-compliant MIDI firmware to MIDEX (%i)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/midex-fw-upload /usr/local/lib/midex/midex-class-r1.ihx
+# -ENODEV on the final CPUCS=0 is expected (the device re-enumerates mid-request)
+# and the uploader already treats it as success, so a clean exit is correct here.

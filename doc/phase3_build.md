@@ -1,7 +1,7 @@
 # Phase 3 — full r1 build (8 ports + real MIDI parser)
 
 Builds on the [Phase 2 spike](spike_bringup.md). Same firmware image name
-(`firmware/midex-spike-r1.ihx`, `make spike`), same PID `0x0A4E:0x10C1`, same
+(`firmware/midex-class-r1.ihx`, `make class`), same PID `0x0A4E:0x10C1`, same
 single EP2-IN/EP2-OUT bulk pair — but now **8 bidirectional cables** and a
 **real USB-MIDI 1.0 RX stream parser** in place of the spike's CIN=0xF
 single-byte passthrough.
@@ -46,7 +46,7 @@ single-byte passthrough.
 
 ## Build status ✅ (hardware-validated, all 8 ports)
 
-`make spike` is clean with SDCC 4.2.0:
+`make class` is clean with SDCC 4.2.0:
 
 - **Code** ~3.6 KB / 6912 bytes (well below the `0x1B00` USB-jump-table ceiling).
 - **XDATA** 80 bytes at `0x2000` = the 8 × 10-byte per-port parser structs (of
@@ -95,7 +95,7 @@ This is recorded in [bus_write_debug.md](bus_write_debug.md) and the comments in
 
 Each test needs a power-cycle (→ loader PID `0x1000`) + re-upload, with
 `snd_usb_midex` unloaded so `snd-usb-audio` wins binding. Upload
-`firmware/midex-spike-r1.ihx` via `host/midex-fw-upload` (or `fxload`), then:
+`firmware/midex-class-r1.ihx` via `host/midex-fw-upload` (or `fxload`), then:
 
 1. **Enumerate / list:** `lsusb -d 0a4e:10c1 -v` shows one AudioControl +
    one MIDIStreaming interface with **8** embedded jacks each way; `amidi -l`

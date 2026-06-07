@@ -21,9 +21,9 @@ PACKIHX = $(PREFIX)packihx
 SIZE = size
 
 # Two firmwares share the vendored enumeration scaffolding:
-#   - the class-compliant MIDI spike (the active deliverable, default target)
+#   - the class-compliant MIDI firmware (the active deliverable, default target)
 #   - the Phase-1 bus-probe diagnostic (frozen *_probe.c snapshots, retained)
-SPIKE_IHX = midex-spike-r1.ihx
+CLASS_IHX = midex-class-r1.ihx
 PROBE_IHX = midex-probe-r1.ihx
 
 # Sources live alongside the headers in this flat directory.
@@ -42,22 +42,22 @@ CFLAGS  = --std-sdcc99 --opt-code-size --model-small
 LDFLAGS = --code-loc 0x0000 --code-size $(CODE_SIZE) --xram-loc $(XRAM_LOC) \
           --xram-size $(XRAM_SIZE) --iram-size 256 --model-small
 
-SPIKE_OBJECTS = main.rel usb.rel usb_descriptors.rel uart.rel midi_parser.rel delay.rel USBJmpTb.rel
+CLASS_OBJECTS = main.rel usb.rel usb_descriptors.rel uart.rel midi_parser.rel delay.rel USBJmpTb.rel
 PROBE_OBJECTS = main_probe.rel usb_probe.rel delay.rel USBJmpTb.rel
 HEADERS = usb.h common.h delay.h reg_ezusb.h io.h board_r1.h uart.h midi_config.h midi_parser.h
 
 .SUFFIXES:
-.PHONY: all spike probe clean hex
+.PHONY: all class probe clean hex
 
-all: spike probe
+all: class probe
 
-spike: $(SPIKE_IHX)
-	$(SIZE) $(SPIKE_IHX) || true
+class: $(CLASS_IHX)
+	$(SIZE) $(CLASS_IHX) || true
 
 probe: $(PROBE_IHX)
 	$(SIZE) $(PROBE_IHX) || true
 
-$(SPIKE_IHX): $(SPIKE_OBJECTS)
+$(CLASS_IHX): $(CLASS_OBJECTS)
 	$(CC) -mmcs51 $(LDFLAGS) -o $@ $^
 
 $(PROBE_IHX): $(PROBE_OBJECTS)
@@ -69,8 +69,8 @@ $(PROBE_IHX): $(PROBE_OBJECTS)
 %.rel: $(SRC_DIR)/%.a51
 	$(AS) -lsgo $@ $<
 
-hex: $(SPIKE_IHX)
-	$(PACKIHX) $(SPIKE_IHX) > $(basename $(SPIKE_IHX)).hex
+hex: $(CLASS_IHX)
+	$(PACKIHX) $(CLASS_IHX) > $(basename $(CLASS_IHX)).hex
 
 clean:
 	rm -f *.asm *.lst *.rel *.rst *.sym *.ihx *.hex *.lnk *.map *.mem *.cdb *.lk

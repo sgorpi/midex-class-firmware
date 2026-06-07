@@ -9,7 +9,7 @@ bus/UART bring-up).
 
 ## What the spike is
 
-Firmware `firmware/midex-spike-r1.ihx` (build: `make spike`). Enumerates as a USB
+Firmware `firmware/midex-class-r1.ihx` (build: `make class`). Enumerates as a USB
 Audio Class 1.0 / MIDIStreaming device, **VID `0x0A4E` / PID `0x10C1`**, exposing
 **2 bidirectional cables** over one bulk endpoint pair (EP2-IN `0x82` +
 EP2-OUT `0x02`). Polled bridge in `firmware/main.c`:
