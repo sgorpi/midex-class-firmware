@@ -31,6 +31,7 @@
 #include "common.h"
 #include "delay.h"
 #include "io.h"
+#include "uart.h"   /* uart_rx_overflows + VENDOR_REQ_* codes */
 
 /* Also update external declarations in "usb.h" if making changes to these. */
 volatile bool Semaphore_Command = 0;
@@ -406,9 +407,25 @@ static void usb_handle_setup_data(void) {
       /* Isochronous endpoints not used -> nothing to do */
       break;
     default:
-      /* Class/vendor requests: a class-compliant MIDIStreaming device needs
-       * none, so stall anything non-standard. */
-      STALL_EP0();
+      /* Vendor requests (bmRequestType bits 6:5 == 10b) expose the RX-overflow
+       * diagnostic counter. The OS class driver never issues these, so the
+       * device stays class-compliant; only an explicit libusb/pyusb control
+       * transfer reaches here. Everything else (class/reserved) stalls. */
+      if ((setup_data.bmRequestType & 0x60) == 0x40) {
+        if (setup_data.bRequest == VENDOR_REQ_GET_RX_OVERFLOWS &&
+            (setup_data.bmRequestType & 0x80)) {            /* device->host IN */
+          IN0BUF[0] = uart_rx_overflows;
+          IN0BC = 1;
+        } else if (setup_data.bRequest == VENDOR_REQ_CLR_RX_OVERFLOWS &&
+                   !(setup_data.bmRequestType & 0x80)) {    /* host->device OUT */
+          uart_rx_overflows = 0;
+          /* zero-length status stage is ACKed by the core HSNAK in sudav_isr */
+        } else {
+          STALL_EP0();
+        }
+      } else {
+        STALL_EP0();
+      }
       break;
   }
 }

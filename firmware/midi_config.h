@@ -34,4 +34,15 @@
  * a power of two. */
 #define MIDI_RX_RING_SIZE  256
 
+/* Per-port raw RX byte FIFO between the high-priority Timer0 capture ISR
+ * (uart_rx_isr) and the main-loop parser. The FIFO-less ST16C454 RHR must be
+ * read within ~320 us (one byte time @ 31250 baud) or it overruns; the ISR
+ * drains it every ~100 us into this FIFO so a sustained stream (long SysEx)
+ * cannot drop a byte even when the main loop or a USB ISR is busy. MUST be a
+ * power of two (index masking); one slot is reserved to tell full from empty.
+ * 16 B/port is ample with high-priority capture (the FIFO stays nearly empty)
+ * -- bump it if the vendor RX-overflow counter ever trips. 8 ports * 16 = 128 B
+ * XDATA. */
+#define MIDEX_RX_FIFO_SIZE  16
+
 #endif /* MIDI_CONFIG_H */

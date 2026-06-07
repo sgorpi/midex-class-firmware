@@ -315,6 +315,48 @@ def open_port(args, port=None):
 
 
 # --------------------------------------------------------------------------
+# firmware RX-overflow counter (vendor control request; needs pyusb)
+# --------------------------------------------------------------------------
+VENDOR_VID, VENDOR_PID = 0x0A4E, 0x10C1
+VENDOR_REQ_GET_RX_OVERFLOWS = 0x01
+VENDOR_REQ_CLR_RX_OVERFLOWS = 0x02
+
+
+def _vendor_dev():
+    """The MIDEX8 USB device for vendor control transfers, or None if pyusb or
+    the device is unavailable (the MIDI checks still run without it)."""
+    try:
+        import usb.core
+    except ImportError:
+        return None
+    return usb.core.find(idVendor=VENDOR_VID, idProduct=VENDOR_PID)
+
+
+def read_rx_overflows():
+    """Return the firmware's saturating RX-overflow byte, or None if it can't be
+    read (no pyusb / no device / transfer error)."""
+    dev = _vendor_dev()
+    if dev is None:
+        return None
+    try:
+        ret = dev.ctrl_transfer(0xC0, VENDOR_REQ_GET_RX_OVERFLOWS, 0, 0, 1)
+        return int(ret[0])
+    except Exception as e:                                  # noqa: BLE001
+        print(f"  (rx-overflow read failed: {e})")
+        return None
+
+
+def clear_rx_overflows():
+    dev = _vendor_dev()
+    if dev is None:
+        return
+    try:
+        dev.ctrl_transfer(0x40, VENDOR_REQ_CLR_RX_OVERFLOWS, 0, 0, None)
+    except Exception as e:                                  # noqa: BLE001
+        print(f"  (rx-overflow clear failed: {e})")
+
+
+# --------------------------------------------------------------------------
 # round-trip helper
 # --------------------------------------------------------------------------
 def roundtrip(rp, send_bytes, drop_realtime=True, idle=0.03, maxwait=1.0):
@@ -576,6 +618,80 @@ def cmd_sysexsweep(args):
     return 0
 
 
+def _classify_corrupt(sent, got):
+    """Classify how a received SysEx echo differs from what was sent, to tell a
+    firmware byte-drop (interior byte missing, F7 still present) from a host-side
+    truncation (got is a prefix, no F7) from a substitution/cross-talk."""
+    if len(got) == 0:
+        return "EMPTY (no bytes parsed)"
+    f7 = got[-1] == 0xF7
+    if got == sent:
+        return "identical?! (canonicalize artifact)"
+    if len(got) < len(sent) and sent.startswith(got):
+        return (f"TRUNCATED prefix: got {len(got)}/{len(sent)} B, "
+                f"endF7={f7}, tail=[{hx(got[-4:])}]")
+    # interior single-byte deletion?
+    for i in range(min(len(sent), len(got) + 1)):
+        if sent[:i] + sent[i + 1:] == got:
+            return (f"INTERIOR DROP @idx {i}: removed {sent[i]:#04x} "
+                    f"(ctx sent=[{hx(sent[max(0,i-2):i+3])}]) endF7={f7}")
+    # first divergence
+    n = min(len(sent), len(got))
+    div = next((i for i in range(n) if sent[i] != got[i]), n)
+    return (f"DIVERGE @idx {div}: sent {len(sent)}B got {len(got)}B endF7={f7} "
+            f"sent[{div}:]=[{hx(sent[div:div+5])}] got[{div}:]=[{hx(got[div:div+5])}]")
+
+
+def cmd_sysexsoak(args):
+    """Sustained long SysEx on N ports simultaneously -- the regression test for
+    the timer-ISR RX fix (the FIFO-less ST16C454 dropping a byte on long
+    streams). Drives all ports at once, compares canonicalized echoes, and reads
+    the firmware RX-overflow counter (0 = no chip overrun). Needs a loopback
+    cable on each tested port."""
+    port_nums = [int(x) for x in args.ports.split(",")]
+    rps = [open_port(args, port=p) for p in port_nums]
+    payload = bytes((i & 0x7F) for i in range(args.size))
+    msg = bytes([0xF0, 0x7D]) + payload + bytes([0xF7])     # one long SysEx
+    exp = canonicalize(msg)
+
+    clear_rx_overflows()
+    for rp in rps:
+        rp.drain_input(0.1)        # clear startup/stale bytes before measuring
+    drops = corrupt = 0
+    samples = []
+    print(f"sysexsoak: {args.reps} reps of a {len(msg)}B SysEx on ports "
+          f"{port_nums} (loop DIN OUT->IN on each) ...")
+    for rep in range(args.reps):
+        for rp in rps:
+            rp.drain_input(0.01)   # drop any inter-rep residue (echo is complete)
+        for rp in rps:
+            rp.write(msg)
+        for i, rp in enumerate(rps):
+            data, _t_first, t_last = rp.collect_idle(0.05, 3.0)
+            if t_last is None:
+                drops += 1
+            elif canonicalize(data) != exp:
+                corrupt += 1
+                if getattr(args, "debug", False) and len(samples) < 20:
+                    samples.append((rep, port_nums[i],
+                                    _classify_corrupt(msg, data)))
+    for rp in rps:
+        rp.close()
+
+    if samples:
+        print("  corrupt samples (rep, port, classification):")
+        for rep, port, info in samples:
+            print(f"    rep {rep:4d} port {port}: {info}")
+
+    ovf = read_rx_overflows()
+    print(f"  drops {drops}  corrupt {corrupt}")
+    print(f"  fw RX-overflow counter: "
+          f"{'(unavailable)' if ovf is None else ovf}")
+    ok = drops == 0 and corrupt == 0 and ovf in (0, None)
+    print(f"=> {'PASS' if ok else 'FAIL'}")
+    return 0 if ok else 1
+
+
 def cmd_selftest(args):
     """Validate the canonicalizer without hardware."""
     cases = [
@@ -654,6 +770,15 @@ def main():
                     help="receive on a different port (cross cable) to test "
                          "self-loopback vs firmware")
     sw.set_defaults(fn=cmd_sysexsweep)
+    so = sub.add_parser("sysexsoak")
+    so.add_argument("--ports", default="1,2,3",
+                    help="comma-separated ports to drive at once")
+    so.add_argument("--reps", type=int, default=200)
+    so.add_argument("--size", type=int, default=256,
+                    help="SysEx payload size in bytes")
+    so.add_argument("--debug", action="store_true",
+                    help="classify each corrupt echo (drop vs truncation)")
+    so.set_defaults(fn=cmd_sysexsoak)
     sub.add_parser("selftest").set_defaults(fn=cmd_selftest)
     a = sub.add_parser("all"); a.add_argument("--count", type=int, default=500)
     a.set_defaults(fn=cmd_all)

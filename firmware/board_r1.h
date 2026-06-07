@@ -64,6 +64,24 @@
 #define BOARD_T2_RCAP2H      0xFF   /* Timer2 reload high (0xFFFE = 2 counts)  */
 /* Fosc/12 = 2 MHz, /2 overflow, T2OUT toggle -> 500 kHz UART XIN.            */
 
+/* ---- Timer0 = RX-capture tick (see uart_rx_isr + timer_isr_rx_capture_design.md) */
+/* Mode 2 (8-bit auto-reload), Fosc/12 = 0.5 us/tick. Reload 0x46 = 256-186 ->
+ * 186 ticks -> ~93 us hardware tick; uart_rx_isr applies a /3 software prescaler
+ * so the (expensive) full 8-port LSR sweep runs every ~279 us. Runs at HIGH
+ * priority (PT0) so it preempts the low-priority USB interrupt.
+ *   Why the prescaler: measured on HW the 8-port sweep is ~100 us (per-port the
+ *   SDCC code recomputes each channel's XDATA address: ~24 instr + 1 MOVX, x8 @
+ *   0.5 us/cycle). At a flat 100 us tick that nearly saturates the CPU (round-trip
+ *   latency tripled 2->6 ms, throughput halved). The /3 prescaler -> ~279 us
+ *   effective (still inside the ~640 us RHR+shift overrun window) drops the cost
+ *   to ~45% and restores most performance. This mirrors stock fw (Timer1 RX poll
+ *   93 us + /3 = 279 us effective). FOLLOW-UP optimisation (PINSA RX-bitmap, see
+ *   the Port A block below): read the 8-bit RX-pending bitmap in 1 MOVX and only
+ *   touch RHR for flagged ports -> ~6 % CPU even at a flat 100 us, but needs the
+ *   PINSA polarity/wiring verified on HW first. */
+#define BOARD_T0_RELOAD    0x46  /* Timer0 TH0/TL0 reload: ~93 us @ Fosc/12     */
+#define BOARD_T0_PRESCALE  3     /* run the LSR sweep every 3rd tick -> ~279 us */
+
 /* ST16C454 RESET release (CONFIRMED: this is what unblocked external writes). */
 /* RESET (pin 37) is ACTIVE HIGH and wired to AN2131 PB4 (PALLV16 pin6 trace). */
 /* Drive PB4 low: PORTBCFG.4=0 (GPIO, not INT4), OUTB.4=0 (latch low), then    */

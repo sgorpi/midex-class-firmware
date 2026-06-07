@@ -193,15 +193,16 @@ void midi_rx_pump(void)
 	 * Always drain the UARTs first -- even while EP2-IN is busy -- so EP2-IN
 	 * back-pressure never blocks RX servicing. Parsed packets queue in rx_ring;
 	 * stop pulling from a UART once the ring lacks room for another packet.
-	 * (The ST16C454 has no RX FIFO -- a 1-byte RHR -- so a sustained stream can
-	 * still overrun if the main loop is delayed; see uart.c TODO re: timer-ISR
-	 * RX.)
+	 * (Bytes are captured into per-port FIFOs by the high-priority Timer0 ISR,
+	 * uart_rx_isr, so the chip RHR is serviced on a hard ~100 us cadence and
+	 * sustained RX cannot overrun; this loop just parses whatever the ISR has
+	 * queued.)
 	 */
 	for (p = 0; p < NUM_MIDI_PORTS; p++) {
-		while (uart_rx_ready(p)) {
+		while (uart_rx_available(p)) {
 			if (rx_ring_count() > (uint8_t)(MIDI_RX_RING_SIZE - 1 - 4))
-				break;
-			parse_byte(p, uart_getc(p));
+				break;        /* ring full: leave byte in FIFO */
+			parse_byte(p, uart_rx_dequeue(p));
 		}
 	}
 

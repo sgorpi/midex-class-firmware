@@ -59,6 +59,11 @@ extern void ep6out_isr(void)   __interrupt;
 extern void ep7in_isr(void)    __interrupt;
 extern void ep7out_isr(void)   __interrupt;
 
+/* Timer0 RX-capture ISR (body in uart.c). Declared here -- with its vector and
+ * register bank -- so SDCC reserves the 8051 Timer0 interrupt vector (0x000B).
+ * __using 1: private register bank for safe nesting over the USB interrupt. */
+extern void uart_rx_isr(void) __interrupt TF0_VECTOR __using 1;
+
 /*
  * USB-MIDI Code Index Number -> number of MIDI data bytes in the 3-byte payload
  * of a 4-byte event packet (USB MIDI 1.0 spec, table 4-1). Index 0/1 are
@@ -236,10 +241,14 @@ void main(void)
 	 * (XDATA is not auto-zeroed on this target). */
 	tx_reset();
 	midi_parser_reset();
+	uart_rx_reset();   /* zero the RX capture FIFOs (after usb_init clobber) */
 
 	/* Now that power/clock/enumeration have settled, release the UART reset and
 	 * configure the channels (see uart_bringup). */
 	uart_bringup();
+
+	/* UART live + FIFOs valid: start the high-priority Timer0 RX-capture tick. */
+	uart_rx_start();
 
 	/* Arm EP2-OUT to receive the first host packet (in case no SET_INTERFACE). */
 	OUT2BC = 0;

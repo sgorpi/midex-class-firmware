@@ -154,17 +154,42 @@ Bugs found and fixed during this validation:
 3. **EP2-IN back-pressure starved RX** — added a device→host ring so
    `midi_rx_pump` always drains the UARTs and ships when EP2-IN is free.
 
-### Known limitation: long/sustained SysEx (⚠️ tracked follow-up)
+### Resolved: long/sustained SysEx RX overrun ✅
 
-A **sustained** stream (a long SysEx, hundreds of bytes) intermittently drops a
-byte. Root cause (datasheet-confirmed): the **ST16C454 is a 16C450-class part
-with NO FIFO** — a single-byte RHR (offset 2 is ISR on read / nothing on write;
-the firmware's earlier `FCR=0x07` "enable FIFO" was a no-op, now removed). At
-31250 baud each byte must be read within ~320 µs or it overruns, and the
-main-loop RX poll is occasionally delayed past that by a USB ISR. Single
-messages and short streams are unaffected; only continuous streams hit it.
+A **sustained** stream (a long SysEx, hundreds of bytes) used to intermittently
+drop a byte. Root cause (datasheet-confirmed): the **ST16C454 is a 16C450-class
+part with NO FIFO** — a single-byte RHR — so at 31250 baud each byte must be read
+within ~320 µs or it overruns, and the old main-loop RX poll was occasionally
+delayed past that by other work.
 
-**Fix (next task): drain RHR from a periodic timer ISR** — exactly what the stock
-firmware does (its Timer-driven RX poller) — so RX is serviced every ~100 µs
-regardless of main-loop work, making sustained RX overrun-proof. The TODO is
-marked in `firmware/uart.c`.
+**Fix (implemented):** a **high-priority Timer0 ISR** (`uart_rx_isr`, mode 2,
+`__using 1`, `PT0=1`) now captures every received byte into per-port software
+FIFOs; the main-loop parser drains them via `uart_rx_available`/`uart_rx_dequeue`.
+The chip RHR is serviced on a hard timer cadence regardless of main-loop or
+low-priority-USB-ISR delay, so sustained RX can no longer overrun. This mirrors
+the stock firmware's Timer-driven RX poller. Full design + stock-firmware
+comparison: [timer_isr_rx_capture_design.md](timer_isr_rx_capture_design.md).
+
+**Performance tuning (prescaler).** The 8-port LSR sweep costs ~100 µs (SDCC
+recomputes each channel's XDATA address per port); at a flat 100 µs tick it
+nearly saturated the CPU — round-trip latency tripled (2 → 6 ms) and throughput
+halved. A **/3 software prescaler** (`BOARD_T0_PRESCALE`) runs the sweep every
+~279 µs (93 µs hardware tick), still well inside the ~640 µs RHR+shift overrun
+window, which restored latency/throughput to baseline while keeping RX
+overrun-proof. A cheaper future option (the **PINSA RX-bitmap pre-filter**, one
+MOVX per tick) is documented in `firmware/board_r1.h` but needs the Port A
+polarity/wiring verified on hardware first.
+
+**Diagnostic counter limitation.** A vendor control request exposes a saturating
+RX-overflow counter (`uart_rx_overflows`), but while the device is bound to the
+in-kernel UAC (`snd-usb-audio`) driver the vendor control transfer does not get
+through (pyusb sees a pipe error / timeout). So the counter is not readable in
+normal operation; validation relies on byte-exact MIDI instead.
+
+**Hardware-validated** (MIDEX8 r1, 3 loopback cables on ports 1–3):
+- `sysexsoak --ports 1,2,3 --reps 500 --size 256`: **0 drops / 0 corrupt**.
+- soak 50 000 round-trips: 0 drops / 0 corrupt, mean ~3.1 ms.
+- timing 1 000: mean ~2.6 ms (baseline ~2.0–2.4 ms).
+- throughput: 0 loss at 500 msg/s/port (loss only as the ~1040-baud ceiling is
+  approached), matching the pre-fix baseline.
+- functional 14/14, sysex 5/5 (incl. 200 B multi-packet).
