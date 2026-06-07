@@ -26,6 +26,12 @@ Examples:
   ./e2e_test.py -p 2 throughput --duration 5
   ./e2e_test.py isolation --ports 1,2,3
 
+The same harness also drives the STOCK firmware (custom snd-usb-midex driver,
+which names its ports "MIDEX Port N"): add `-m "MIDEX Port"`. Handy for comparing
+stock vs class-compliant latency/jitter. On stock, the firmware RX-overflow
+counter is unavailable (it is a class-fw vendor request) and real-time bytes are
+passed through unfiltered, but the canonicalizer drops them so the checks hold.
+
 Notes / caveats:
   * System real-time bytes (>=0xF8: clock F8, sensing FE, ...) are FILTERED by
     snd-usbmidi on the INPUT side, so they never come back through ALSA even
@@ -300,7 +306,9 @@ def find_ports(match="MIDEX8 UAC"):
         addr, name = m.group(1), m.group(2)
         if match.lower() not in name.lower():
             continue
-        mn = re.search(r"MIDI\s+(\d+)\s*$", name)
+        # class fw names ports "MIDEX8 UAC MIDI 1"; the stock snd-usb-midex
+        # driver names them "MIDEX Port 1" -- accept either trailing keyword.
+        mn = re.search(r"(?:MIDI|Port)\s+(\d+)\s*$", name)
         if mn and "," in addr:
             ports[int(mn.group(1))] = addr
     return ports
@@ -743,7 +751,9 @@ def main():
     ap.add_argument("-p", "--port", type=int, default=1,
                     help="MIDEX port number (1-based, default 1)")
     ap.add_argument("-m", "--match", default="MIDEX8 UAC",
-                    help="port-name substring (default 'MIDEX8 UAC')")
+                    help="port-name substring (default 'MIDEX8 UAC' for the "
+                         "class firmware; use 'MIDEX Port' for the stock "
+                         "snd-usb-midex firmware)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("functional").set_defaults(fn=cmd_functional)
     sub.add_parser("sysex").set_defaults(fn=cmd_sysex)

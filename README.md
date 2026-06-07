@@ -71,6 +71,59 @@ once, 500 × 259-byte SysEx each (`e2e_test.py sysexsoak --ports 1,2,3`):
 > roughly tripled latency and halved throughput. Details:
 > [`doc/timer_isr_rx_capture_design.md`](doc/timer_isr_rx_capture_design.md).
 
+### vs. the stock firmware
+
+The same harness drives the **stock** Steinberg firmware (PID `0x1001`, custom
+`snd-usb-midex` kernel driver) — pass `-m "MIDEX Port"`, the name its ports
+enumerate under. Both firmwares were measured on the **same** r1 unit with the
+same loopback cables on ports 1–3, so the numbers are directly comparable.
+
+**Round-trip latency** (ms), stock vs class-compliant:
+
+| test | fw | min | mean | median | p95 | p99 | max | sd |
+|------|----|-----|------|--------|-----|-----|-----|----|
+| `timing` (1 000)  | stock | 2.40 | 2.91 | 2.92 | 2.96 | 3.10 | 20.16 | 0.56 |
+| `timing` (1 000)  | class | 2.07 | 2.57 | 2.51 | 2.97 | 3.27 | **3.79** | 0.27 |
+| `soak` (50 000)   | stock | 2.42 | 3.01 | 2.99 | 3.03 | 3.95 | 23.42 | 0.14 |
+| `soak` (50 000)   | class | 1.91 | 3.09 | 2.99 | 4.00 | 4.42 | **5.45** | 0.72 |
+
+Central tendency is close (medians within ~0.4 ms), but the stock firmware shows
+rare **~20 ms latency outliers** (its `max`), consistent with the proprietary
+firmware's ~25.6 ms host-timing tick occasionally gating a delivery; the
+class-compliant firmware bounds its worst case under 6 ms. Both reported
+**0 drops / 0 corrupt** over 50 000 round-trips.
+
+**Throughput**, single port full-duplex for 5 s, % loss:
+
+| target rate | stock | class |
+|-------------|-------|-------|
+| 500 msg/s   | 0 %   | 0 %   |
+| 800 msg/s   | 0 %   | 8.5 % |
+| 1000 msg/s  | 0 %   | 24.3 % |
+
+The stock `snd-usb-midex` path holds 0 % loss right up to the ~1040 msg/s/port
+UART ceiling, where the class firmware begins shedding above ~800 msg/s. Most of
+that gap is **host-side input buffering**, not device drops (the stock driver's
+interrupt-endpoint URB pool absorbs bursts the class path overflows), so it
+reflects driver/buffering depth rather than a raw device-capacity difference —
+both share the same UART line-rate limit.
+
+**Jitter** (stock, 1 000 msgs at a 10 ms interval): inter-arrival mean 10.00 ms,
+sd 0.58; absolute jitter vs target mean 0.33 / p99 1.25 / max 2.31 ms; 1000/1000
+received.
+
+**Sustained SysEx** (`sysexsoak --ports 1,2,3`, 500 × 259-byte): stock
+**0 drops / 0 corrupt** (PASS), same as the class firmware. The stock firmware's
+RX-overflow counter is a class-firmware-only vendor request, so that telemetry
+reads "unavailable" on stock.
+
+**Correctness** (`functional`, 14 cases): the class firmware passes all 14; the
+stock firmware passes **13/14**, reproducibly dropping the **Song Position
+Pointer** `[F2 12 34]` (the only 2-data-byte system-common message — MTC `F1`,
+song-select `F3` and tune-request `F6` all echo fine). The stock driver also
+passes MIDI **real-time bytes** (`0xF8`/`0xFE`) up unfiltered, whereas the class
+path (`snd-usbmidi`) filters them on input.
+
 ## Layout
 
 - [`firmware/`](firmware/) — EZ-USB (8051) firmware. Build with SDCC: `cd firmware && make`.
