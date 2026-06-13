@@ -15,22 +15,21 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "board_r1.h"
+#include "board.h"
 
-/* A channel's register block lives at BOARD_UART_BASE + port*BOARD_UART_STRIDE
- * in 8051 XDATA; registers are added as the standard 16550 datasheet offsets. */
-#define UART_REG(port, off) \
-	(*((__xdata volatile uint8_t *)(BOARD_UART_BASE + \
-	 (uint16_t)(port) * BOARD_UART_STRIDE + (off))))
+/* This is the firmware's UART op-set seam. The MIDI bridge in main.c talks only
+ * to the ops below; uart.c dispatches each per-port call to the right backend
+ * (external 16550 in uart_ext.c for ports < BOARD_ONCHIP_PORT_FIRST, on-chip FX
+ * UART in uart_onchip.c for the rest on r2). On r1 every port is external and
+ * the on-chip branch compiles out. */
 
-/* Initialise every channel 0..NUM_MIDI_PORTS-1: 8N1, divisor 1 (31250 baud from
- * the 500 kHz XIN). The ST16C454 is a 16C450-class part with no FIFO (single-
- * byte RHR). LCR writes are read-back verified (see uart.c). Call only after the
- * late UART bring-up releases reset; configuring at power-on is marginal (see
- * main.c uart_bringup). */
+/* Initialise every MIDI port for 31250 baud, 8N1: external channels via
+ * uart_ext_init and (r2) the on-chip UARTs via uart_onchip_init. Call only
+ * after the late UART bring-up releases reset; configuring at power-on is
+ * marginal (see main.c uart_bringup). */
 void uart_init(void);
 
-/* TX: true when the channel's transmit holding register can accept a byte. */
+/* TX: true when the port's UART can accept a byte. */
 bool uart_tx_ready(uint8_t port);
 
 /* TX: push one byte (caller should gate on uart_tx_ready first). */

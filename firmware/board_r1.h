@@ -15,6 +15,15 @@
                                        * the snd-usb-midex table so that
                                        * snd-usb-audio wins binding         */
 #define BOARD_NUM_PORTS      8        /* main loop iterates ports 0..7      */
+#define BOARD_REV            1        /* hardware revision (see board.h)    */
+
+/* ---- UART backend split (see uart.c dispatcher) ----------------------- */
+/* r1 is all-external: every MIDI port is an external 16550 channel, so there
+ * is no on-chip-UART backend and the dispatcher's on-chip branch compiles out.
+ * BOARD_ONCHIP_PORT_FIRST == NUM_MIDI_PORTS means "no on-chip ports". */
+#define BOARD_HAS_ONCHIP_UART   0
+#define BOARD_NUM_EXT_PORTS     8     /* ports 0..7 are external 16550      */
+#define BOARD_ONCHIP_PORT_FIRST 8     /* no on-chip UART ports              */
 
 /* ---- External UART bank (16550-class, memory-mapped XDATA) ------------- */
 /* UART[port] base = BOARD_UART_BASE + port * BOARD_UART_STRIDE             */

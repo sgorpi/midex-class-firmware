@@ -30,9 +30,24 @@ necessary, taken down — independently.
   [`doc/timer_isr_rx_capture_design.md`](doc/timer_isr_rx_capture_design.md).
   [`firmware/midi_config.h`](firmware/midi_config.h) `NUM_MIDI_PORTS` is the
   single knob that scales the descriptors + bridge.
+- **Phase 5 (MIDEX8 r2 = EZ-USB FX CY7C646): complete, hardware-validated.**
+  r2 is a **hybrid backend** — 6 external 16550 channels (ST16C454 + ST16C452,
+  divisor 24 off a fixed 12 MHz crystal) drive ports 1–6, and the FX's **two
+  on-chip UARTs** drive ports 7–8. A board seam ([`board.h`](firmware/board.h),
+  `make BOARD=r2`) selects [`board_r2.h`](firmware/board_r2.h) and a split UART
+  backend ([`uart_ext.c`](firmware/uart_ext.c) + [`uart_onchip.c`](firmware/uart_onchip.c))
+  behind the shared op-set; the on-chip ports are polled, and the single
+  high-priority Timer0 RX-capture ISR services both backends. All 8 ports
+  round-trip MIDI byte-exact and the firmware-port→panel-jack mapping is
+  identity. The proprietary timestamp engine and host-timing tick are dropped
+  (class-compliant USB-MIDI has no per-event timestamps). Full RE comparison:
+  [`doc/midex8_r1_vs_r2.md`](doc/midex8_r1_vs_r2.md).
 
-The bus-probe is retained as a diagnostic (`make probe`); the spike is the
-default build (`make class`).
+The bus-probe is retained as a diagnostic (`make probe`); the class firmware is
+the default build — `make class` (r1), `make BOARD=r2 class` (r2), or `make both`
+to produce both images. The host installer auto-uploads the image matching the
+appearing device's loader PID (`0x1000`→r1, `0x1010`→r2), so plugging in either
+revision just works; see [`host/README.md`](host/README.md).
 
 ## Performance
 
@@ -40,6 +55,8 @@ Measured on a physical MIDEX8 **r1** running `firmware/midex-class-r1.ihx`, via
 the ALSA-rawmidi harness ([`host/e2e_test.py`](host/e2e_test.py)) with MIDI
 loopback cables (DIN OUT→IN) on the tested ports. The UART line rate is the hard
 limit: 31250 baud ÷ 10 bits ÷ 3 bytes ≈ **~1040 three-byte messages/s per port**.
+
+### MIDEX8 r1 (8× external 16550)
 
 **Round-trip latency** (host→device→DIN→loopback→device→host), single port:
 
@@ -70,6 +87,40 @@ once, 500 × 259-byte SysEx each (`e2e_test.py sysexsoak --ports 1,2,3`):
 > servicing the eight UARTs costs little CPU; without it a flat 100 µs tick
 > roughly tripled latency and halved throughput. Details:
 > [`doc/timer_isr_rx_capture_design.md`](doc/timer_isr_rx_capture_design.md).
+
+### MIDEX8 r2 (hybrid: external 16550 + on-chip FX UARTs)
+
+Measured on a physical MIDEX8 **r2** running `firmware/midex-class-r2.ihx`, same
+harness, with loopback cables on an external port (1) and both on-chip ports
+(7, 8). The on-chip ports are the FX's two internal UARTs — a single-byte `SBUF`
+captured on the shared ~279 µs Timer0 sweep — while the external ports are the
+ST16C45x as on r1 but at divisor 24.
+
+**Round-trip latency** (ms), external vs on-chip backend:
+
+| test | port (backend) | min | mean | median | p95 | p99 | max | sd |
+|------|----------------|-----|------|--------|-----|-----|-----|----|
+| `timing` (2 000) | 1 (external) | 1.64 | 1.94 | 1.94 | 1.95 | 2.12 | 2.66 | 0.05 |
+| `timing` (2 000) | 7 (on-chip)  | 1.68 | 2.04 | 1.94 | 2.52 | 2.56 | 7.33 | 0.24 |
+| `soak` (20 000)  | 1 (external) | 1.40 | 2.30 | 2.00 | 4.00 | 4.01 | 4.28 | 0.81 |
+| `soak` (20 000)  | 7 (on-chip)  | 1.38 | 2.42 | 2.00 | 4.00 | 4.01 | 4.34 | 0.82 |
+
+Both backends reported **0 drops / 0 corrupt** over 20 000 round-trips. The
+on-chip ports show slightly higher tail jitter (occasional 7–9 ms vs the external
+path's ~2.7 ms max) — the cost of polling the single-byte `SBUF` on the capture
+sweep — but no drops.
+
+- **`functional`** (14 cases) and **`sysex`** (including a 200-byte
+  multi-USB-packet message) pass on both an external and an on-chip port.
+- **`jitter`** (on-chip port, 1 000 msgs @ 10 ms interval): inter-arrival mean
+  10.00 ms; absolute jitter vs target p99 1.02 / max 1.20 ms; 1000/1000 received.
+- **`throughput`** (5 s full-duplex): ~1150 msg/s external, ~960 msg/s on-chip,
+  both near the ~1040 msg/s/port UART ceiling (loss above it is largely host-side
+  input buffering, as on r1).
+- **`isolation`**: sending on any port produces no echo on the others — no
+  crosstalk between the external and on-chip backends.
+- **port→jack mapping**: identity (ALSA port *N* = front-panel jack *N*),
+  confirmed with a cross-cable scan ([`host/map_scan.py`](host/map_scan.py)).
 
 ### vs. the stock firmware
 
@@ -130,8 +181,10 @@ path (`snd-usbmidi`) filters them on input.
 - [`host/`](host/) — host-side tools (libusb uploader + Python bring-up/test
   scripts). See [`host/README.md`](host/README.md).
 - [`doc/`](doc/) — reverse-engineering notes:
-  [hardware register map](doc/hardware_register_map.md) and the
-  [external-write debug log](doc/bus_write_debug.md).
+  [hardware register map](doc/hardware_register_map.md), the
+  [external-write debug log](doc/bus_write_debug.md), and the
+  [r1 vs r2 firmware comparison](doc/midex8_r1_vs_r2.md) (the hybrid-backend
+  derivation behind `board_r2.h`).
 
 ## Legal
 

@@ -25,6 +25,7 @@
  */
 #include "usb.h"
 #include "midi_config.h"
+#include "board.h"
 
 /* The jack list and endpoint association arrays below are hand-unrolled for the
  * r1 port count (8). The length constants derive from NUM_MIDI_PORTS, and the
@@ -35,8 +36,10 @@
 #error "usb_descriptors.c is hand-packed for 8 ports; adjust the jack list."
 #endif
 
-#define ID_VENDOR   0x0A4E   /* Steinberg                                     */
-#define ID_PRODUCT  0x10C1   /* fresh class-compliant PID (snd-usb-audio binds)*/
+/* VID/PID come from the selected board header (board_r1.h: 0x10C1; board_r2.h:
+ * 0x10C2) so the two class builds enumerate as distinct devices. */
+#define ID_VENDOR   BOARD_USB_VID
+#define ID_PRODUCT  BOARD_USB_PID
 #define BCD_DEVICE  0x0100   /* firmware version 1.00                          */
 
 /* --- USB Audio Class / MIDIStreaming descriptor constants ----------------- */

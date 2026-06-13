@@ -260,8 +260,10 @@ register** (re-examine what r2 actually needs). Full RE deferred to Phase 5.
 ## MIDEX3 — 3 ports — future-phase delta (scoping only, no hardware)
 
 Firmware: `doc/firmware/midex3_combined.bin` (6419 bytes, Mac-derived).
-Reset vector `0x0000 → LJMP 0x01C8` (`fw_entry`). **Statically analyzed for effort
-estimation only — not on the build path.**
+Reset vector `0x0000 → LJMP 0x01C8` (`fw_main`). **Statically analyzed for effort
+estimation only — not on the build path.** Re-analysed 2026-06-10 with the r2 FX
+findings (see [`midex8_r1_vs_r2.md`](midex8_r1_vs_r2.md)) — several earlier guesses
+are now corrected/confirmed below.
 
 ### Shared with MIDEX8 ✅ (most of the codebase)
 - Same EZ-USB-family 8051 build and enumeration scaffolding.
@@ -271,33 +273,54 @@ estimation only — not on the build path.**
 - Same `0x____00 = 0xC9` glue-latch idiom (here at `0x1B00`, vs r1 `0xFE00`).
 - → USB, descriptor, and parser layers of our class firmware are reusable as-is.
 
-### The big divergence ⚠️ — MIDI backend is **on-chip serial, not external 16550s**
+### The big divergence ✅ — MIDI backend is **all on-chip / bit-banged, no external 16550s**
 MIDEX3 has **no `0x40xx` UART window and no 16550 init** (`0x83→LCR` signature
-absent). Instead it uses the MCU's **on-chip serial ports**:
-- **Port 0** → on-chip UART0: `SCON = …|0x56`, `ES=1`, TX kicked via `TI=1`.
-- **Port 1** → a second on-chip serial: armed via `FIFLG`/`EC=1`/`CF=1`, TX via
-  the `FIFLG` bit. Two active serial ISRs — Serial0 `0x0CA4` (vec `0x23`) and
-  Serial1 `0x0C69` (vec `0x33`).
-- **Port 2** → toggles an I/O-port bit (`0x7F96 ^ 0x20`); likely a bit-banged /
-  port-driven third channel. ❓ confirm mechanism on hardware.
-- **Baud:** Timer1 mode 2, `TH1=TL1=0xF4` (reload 12), `PCON|0x80` (SMOD=1),
-  `CKCON` (SFR `0x8E`) bit4 set (T1M → timer1 clock = CLK/4). With a 24 MHz core:
-  `(2/32) × 24e6/(4×12) = 31250 baud` ✅ (math checks out for MIDI).
+absent). All three ports live on the EZ-USB FX itself:
 
-### Chip-ID note ❓
-Two on-chip UARTs in use (Serial0 **and** Serial1 vectors active) is *suggestive*
-of a **dual-UART FX-class part (CY7C646)** rather than the single-UART AN2131 —
-behavioral evidence the plan's register-map diff couldn't provide. Not definitive;
-the `0x7Fxx` maps are byte-identical between the parts, so confirm via the PCB chip
-marking or loader-mode silicon ID when hardware is available.
+| Port | Backend | TX | RX |
+|------|---------|----|----|
+| **0** | on-chip **UART0** (`SCON` 0x98 = `…\|0x56`, `ES=1`) | stage IDATA `0x7C`, `TI=1` (`serial0_isr`@`0x0CA4`, vec `0x23`) | **read in `serial0_isr`** → XDATA ring page `0x26` ✅ |
+| **1** | on-chip **UART1** (`SCON1` 0xC0 = `…\|0x46`, `EC=1`) | stage IDATA `0x7D`, set `SCON1.TI` (`serial1_isr`@`0x0D04`, **vec `0x3B`**) | ISR clears `RI_1` but **does not read** `SBUF1` (REN_1 clear) → **TX-only** ⚠️ |
+| **2** | **bit-banged software UART** on `OUTC.3`/PC3 (XDATA `0x7F98` bit3) | `port2_bitbang_tx_timer2_isr`@`0x0D24` (vec `0x2B`), 10-bit frame LSB-first | no bit-bang RX sampler → **TX-only** ⚠️ |
+
+- **Vector correction:** the earlier draft mislabelled `0x0C69` (vec `0x33`) as
+  "Serial1". Re-checked against r2: **vec `0x33` (`0x0C69`) is the FX Resume/Wakeup
+  stub** (clears a `CCON` bit); the *real* UART1 handler is **`0x0D04` at vec
+  `0x3B`** — the same vector r2 uses for its confirmed UART1. ⚠️ Ghidra's
+  `8051:BE:16` SFR map renders UART1 wrong: **`FIFLG` = `SCON1` (SFR 0xC0)**,
+  **`FIFLG1` = `SBUF1` (SFR 0xC1)** (CY7C646 TRM Table 18-15).
+- **Port 2 (now precise):** a true **bit-banged UART TX** — `port2_bitbang_tx_timer2_isr`
+  shifts a 10-bit frame (start + 8 data LSB-first + stop) out on **PC3** one bit per
+  Timer2 overflow. **Timer2 `RCAP2 = 0xFFC0`** = 64 counts = **32 µs = exactly one
+  31250-baud bit**. The old `0x7F96 ^ 0x20` read was the heartbeat-LED else-case,
+  **not** port 2.
+- **RX asymmetry (new finding):** only **port 0** has an active receiver in this
+  image; UART1 RX is discarded and port 2 has no RX sampler. So MIDEX3 may capture
+  **MIDI-in on port 0 only** — ❓ confirm on hardware / against a real capture
+  (could be intentional, or RX completed via a path absent from this Mac image).
+- **Baud (on-chip UARTs):** Timer1 mode 2, `TH1=TL1=0xF4` (reload 12), `PCON|0x80`
+  (SMOD=1), `CKCON` (SFR `0x8E`) bit4 set (T1M → CLK/4). 24 MHz core:
+  `(2/32) × 24e6/(4×12) = 31250 baud` ✅.
+
+### Chip-ID — CONFIRMED FX-class (CY7C646) ✅
+Earlier this was only *suggestive*; the r2 pass settles it. MIDEX3 drives port 1
+through `SCON1`/`SBUF1` (SFR 0xC0/0xC1) with the UART1 interrupt at **vec `0x3B`**
+— behaviour that **only exists on the dual-UART EZ-USB FX**, and is byte-for-byte
+the mechanism confirmed on the FX-based MIDEX8 r2. The single-UART AN2131 (r1) has
+neither SFR. (PCB chip-marking confirmation still nice-to-have, but the firmware is
+now conclusive.)
 
 ### MIDEX3 future-phase effort estimate
 Larger than an r2-style `board_*.h` addition: the external-16550 MOVX backend does
-**not** apply. A MIDEX3 port needs a **separate on-chip-serial UART backend**
-(SCON/SBUF + second serial + port-2 channel + timer1 baud setup) behind the same
-`uart.c` interface, plus a 3-port descriptor set. USB/descriptor/parser layers are
-shared. Gate on acquiring real MIDEX3 hardware (the `0x1100→0x1101` upload path is
-still unverified — see `firmware_upload_process.md`).
+**not** apply at all. A MIDEX3 port needs **three** TX paths behind the `uart.c`
+seam — on-chip **UART0** (`SCON`/`SBUF`), on-chip **UART1** (`SCON1`/`SBUF1`), and
+a **Timer2 bit-bang** on PC3 — plus the Timer1 baud setup, and (if full duplex is
+wanted) **RX for ports 1–2 that the stock image does not implement** (would mean
+enabling `REN_1` + reading `SBUF1`, and a bit-bang RX sampler for port 2). The
+on-chip-UART half is **shared with r2** (ports 6–7), so doing r2 first delivers
+two-thirds of MIDEX3's backend. USB/descriptor/parser layers are shared. Gate on
+acquiring real MIDEX3 hardware (the `0x1100→0x1101` upload path is still unverified
+— see `firmware_upload_process.md`). Full RE writeup: [`midex8_r1_vs_r2.md`](midex8_r1_vs_r2.md).
 
 ---
 

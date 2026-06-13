@@ -25,7 +25,7 @@
 #include "reg_ezusb.h"
 #include "usb.h"
 #include "delay.h"
-#include "board_r1.h"
+#include "board.h"
 #include "uart.h"
 #include "midi_config.h"
 #include "midi_parser.h"
@@ -83,9 +83,48 @@ static const __code uint8_t cin_len[16] = {
  */
 static void board_init(void)
 {
-	/* CPUCS=0 clears CLK24OE (bit1), matching stock fw_entry from boot. */
+	/* CPUCS=0 clears CLK24OE (bit1), matching stock fw_entry from boot. (On the
+	 * FX, CPUCS.3 -- the 24/48 MHz strap -- is read-only, so this is harmless
+	 * there and the on-chip baud setup honours it later.) */
 	CPUCS = 0;
 
+#if BOARD_REV == 2
+	/* ---- MIDEX8 r2 (EZ-USB FX): hybrid backend bring-up ---------------- */
+	/* External-memory + FX strobes and the on-chip-UART pin mux, all via the
+	 * port-config registers (see board_r2.h, derived from stock fw_main):
+	 *   PORTACFG = OE#               (PA2, FX external-bus output enable)
+	 *   PORTCCFG = RD#|WR#|TxD0|RxD0 (PC7/PC6 bus strobes, PC1/PC0 UART0)
+	 *   PORTBCFG = TxD1|RxD1         (PB3/PB2 UART1; PB4 stays GPIO for RESET) */
+	PORTACFG = BOARD_PORTACFG_VAL;
+	PORTCCFG = BOARD_PORTCCFG_VAL;
+	PORTBCFG = BOARD_PORTBCFG_VAL;
+
+	/* MOVX cycle stretch = 0 and T2M=0, as stock (Timer2 is unused on r2 -- the
+	 * external UART clock is the board 12 MHz crystal, not Timer2->PB7). */
+	CKCON &= ~0x27;
+
+	/* Hold BOTH external UARTs in reset through power-on + enumeration, then
+	 * release them in uart_bringup() once the external write glue has settled
+	 * (same late-bring-up rationale as r1). The two chips have OPPOSITE reset
+	 * polarity (see board_r2.h):
+	 *   ST16C454 RESET (PB4, active-high): leave PB4 high-Z (pulled high =
+	 *     asserted); latch OUTB.4=0 so enabling the driver later drives it low.
+	 *   ST16C452 RESET (PC4, active-low): drive PC4 low NOW (= asserted) and
+	 *     enable its output; uart_bringup raises it to release. */
+	OUTB &= ~BOARD_R454_RESET_OUT_BIT;   /* PB4 latch low, not yet driven   */
+	OUTC &= ~BOARD_R452_RESET_OUT_BIT;   /* PC4 = 0 -> ST16C452 in reset     */
+	OEC  |= BOARD_R452_RESET_OEC_BIT;    /* drive PC4                        */
+
+#if BOARD_MIRROR_PC2_LOW
+	/* PC2: stock drives this output low; purpose untraceable on the PCB.
+	 * Mirrored as cheap insurance against it being an external-bus buffer-OE
+	 * (see board_r2.h). Drop once bring-up proves ports 0-5 work without it. */
+	OUTC &= ~OUTC2;
+	OEC  |= BOARD_PC2_OEC_BIT;
+#endif
+
+#else
+	/* ---- MIDEX8 r1 (EZ-USB AN2131): all-external backend -------------- */
 	/* PORTCCFG bit7=RD#, bit6=WR#: PC7/PC6 become the external-memory read/
 	 * write strobes. Without this, MOVX to the UART window never latches. */
 	PORTCCFG |= 0xC0;
@@ -119,6 +158,7 @@ static void board_init(void)
 	*((__xdata uint8_t *)BOARD_GLUE_LATCH) = BOARD_GLUE_VALUE;
 	*((__xdata uint8_t *)0xFE02) = 0x00;
 	*((__xdata uint8_t *)0xFE01) = 0x10;
+#endif
 }
 
 /*
@@ -214,9 +254,19 @@ static void uart_tx_pump(void)
 static void uart_bringup(void)
 {
 	delay_ms(BOARD_UART_BRINGUP_DELAY_MS);  /* let the write glue settle    */
+#if BOARD_REV == 2
+	/* Release both external UARTs from reset (opposite polarities, see
+	 * board_init): ST16C454 by driving PB4 low, ST16C452 by raising PC4 high.
+	 * PC4's output driver was already enabled in board_init. */
+	OEB  |= BOARD_R454_RESET_OEB_BIT;       /* drive PB4 low -> 454 released  */
+	OUTC |= BOARD_R452_RESET_OUT_BIT;       /* PC4 high      -> 452 released  */
+	delay_ms(1);                            /* reset-recovery                */
+	uart_init();                            /* ext (div 24) + on-chip UART0/1 */
+#else
 	OEB |= OEB4;                            /* drive PB4 low: RESET released */
 	delay_ms(1);                            /* ST16C454 reset-recovery       */
 	uart_init();                            /* 8N1, divisor 1, verified      */
+#endif
 }
 
 void main(void)
