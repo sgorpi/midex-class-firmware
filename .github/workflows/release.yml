@@ -44,9 +44,10 @@ jobs:
             os: ubuntu-22.04
           - name: linux-arm64
             os: ubuntu-22.04-arm
-          - name: macos-x86_64
-            os: macos-13
-          - name: macos-arm64
+          # One universal2 binary (x86_64 + arm64). GitHub's Intel macOS runner
+          # (macos-13) is being retired and the rest are Apple Silicon, so we
+          # cross-build both slices on arm64 and ship a single fat binary.
+          - name: macos-universal
             os: macos-14
           - name: windows-x86_64
             os: windows-latest
@@ -96,6 +97,10 @@ jobs:
             "https://github.com/libusb/libusb/releases/download/v${LIBUSB_VERSION}/libusb-${LIBUSB_VERSION}.tar.bz2"
           tar xf libusb.tar.bz2
           cd "libusb-${LIBUSB_VERSION}"
+          # Build a universal (fat) static lib on macOS so the tool can be too.
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            export CFLAGS="${CFLAGS:-} -arch x86_64 -arch arm64"
+          fi
           ./configure --prefix="$prefix" --disable-shared --enable-static --disable-udev
           make -j
           make install
@@ -105,19 +110,22 @@ jobs:
       - name: Configure & build midex-fw-upload
         run: |
           set -euo pipefail
-          # MinGW: also statically link libgcc/winpthread so the .exe is truly
-          # standalone. POSIX targets keep libc/system frameworks dynamic.
-          extra_ldflags=""
-          generator_args=""
+          # MSYS2's cmake defaults to the Ninja generator (Ninja ships with the
+          # mingw cmake package), so we don't override the generator anywhere.
+          extra_args=()
           if [ "${{ runner.os }}" = "Windows" ]; then
-            extra_ldflags="-static"
-            generator_args='-G "MinGW Makefiles"'
+            # Also statically link libgcc/winpthread so the .exe is standalone.
+            extra_args+=(-DCMAKE_EXE_LINKER_FLAGS=-static)
           fi
-          eval cmake -S host -B host/build $generator_args \
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            # Build a universal2 binary matching the fat libusb above.
+            extra_args+=("-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64")
+          fi
+          cmake -S host -B host/build \
             -DCMAKE_BUILD_TYPE=Release \
             -DMIDEX_STATIC_LIBUSB=ON \
             -DCMAKE_PREFIX_PATH="$LIBUSB_PREFIX" \
-            -DCMAKE_EXE_LINKER_FLAGS="$extra_ldflags"
+            "${extra_args[@]}"
           cmake --build host/build --config Release
 
       - name: Smoke test (binary runs, no shared libusb)
@@ -138,6 +146,9 @@ jobs:
             ! ldd "$bin" | grep -qi 'libusb' || { echo "ERROR: libusb linked dynamically"; exit 1; }
           elif [ "${{ runner.os }}" = "macOS" ]; then
             otool -L "$bin" || true
+            echo "architectures: $(lipo -archs "$bin")"
+            lipo -archs "$bin" | grep -q x86_64
+            lipo -archs "$bin" | grep -q arm64
             ! otool -L "$bin" | grep -qi 'libusb' || { echo "ERROR: libusb linked dynamically"; exit 1; }
           fi
 
