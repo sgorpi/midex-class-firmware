@@ -13,7 +13,10 @@ set -eu
 
 # --- install locations -------------------------------------------------------
 BIN_DST=/usr/local/bin/midex-fw-upload
-FW_DST=/usr/local/lib/midex/midex-class-r1.ihx
+DISPATCH_DST=/usr/local/bin/midex-upload-dispatch.sh
+FW_DIR=/usr/local/lib/midex
+FW_DST_R1=$FW_DIR/midex-class-r1.ihx
+FW_DST_R2=$FW_DIR/midex-class-r2.ihx
 RULE_DST=/etc/udev/rules.d/99-midex-class.rules
 UNIT_DST=/etc/systemd/system/midex-upload@.service
 BLACKLIST_DST=/etc/modprobe.d/midex-class.conf
@@ -22,7 +25,9 @@ STOCK_MODULE=snd_usb_midex
 # --- sources (relative to this script) ---------------------------------------
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 BIN_SRC=$HERE/build/midex-fw-upload
-FW_SRC=$HERE/../firmware/midex-class-r1.ihx
+DISPATCH_SRC=$HERE/install/midex-upload-dispatch.sh
+FW_SRC_R1=$HERE/../firmware/midex-class-r1.ihx
+FW_SRC_R2=$HERE/../firmware/midex-class-r2.ihx
 RULE_SRC=$HERE/install/99-midex-class.rules
 UNIT_SRC=$HERE/install/midex-upload@.service
 BLACKLIST_SRC=$HERE/install/midex-class-blacklist.conf
@@ -36,9 +41,12 @@ reload_udev() { udevadm control --reload && udevadm trigger --subsystem-match=us
 cmd_install() {
 	need_root install
 	[ -f "$BIN_SRC" ] || { echo "error: $BIN_SRC not built (run: cmake -S . -B build && cmake --build build)" >&2; exit 1; }
-	[ -f "$FW_SRC" ]  || { echo "error: $FW_SRC not built (run: make -C ../firmware class)" >&2; exit 1; }
-	install -Dm755 "$BIN_SRC"  "$BIN_DST"
-	install -Dm644 "$FW_SRC"   "$FW_DST"
+	[ -f "$FW_SRC_R1" ] || [ -f "$FW_SRC_R2" ] || { echo "error: no firmware built (run: make -C ../firmware class   and/or   make -C ../firmware BOARD=r2 class)" >&2; exit 1; }
+	install -Dm755 "$BIN_SRC"      "$BIN_DST"
+	install -Dm755 "$DISPATCH_SRC" "$DISPATCH_DST"
+	# Install whichever revision images are built; the dispatcher picks by PID.
+	[ -f "$FW_SRC_R1" ] && install -Dm644 "$FW_SRC_R1" "$FW_DST_R1" && echo "  + r1 image"
+	[ -f "$FW_SRC_R2" ] && install -Dm644 "$FW_SRC_R2" "$FW_DST_R2" && echo "  + r2 image"
 	install -Dm644 "$RULE_SRC" "$RULE_DST"
 	install -Dm644 "$UNIT_SRC" "$UNIT_DST"
 	systemctl daemon-reload
@@ -68,7 +76,7 @@ cmd_stock() {
 
 cmd_status() {
 	echo "installed files:"
-	for f in "$BIN_DST" "$FW_DST" "$RULE_DST" "$UNIT_DST"; do
+	for f in "$BIN_DST" "$DISPATCH_DST" "$FW_DST_R1" "$FW_DST_R2" "$RULE_DST" "$UNIT_DST"; do
 		[ -e "$f" ] && echo "  [x] $f" || echo "  [ ] $f"
 	done
 	echo "active path:"
@@ -87,8 +95,8 @@ cmd_status() {
 cmd_uninstall() {
 	need_root uninstall
 	systemctl unmask midex-upload@.service 2>/dev/null || true
-	rm -f "$BIN_DST" "$FW_DST" "$RULE_DST" "$UNIT_DST" "$BLACKLIST_DST"
-	rmdir /usr/local/lib/midex 2>/dev/null || true
+	rm -f "$BIN_DST" "$DISPATCH_DST" "$FW_DST_R1" "$FW_DST_R2" "$RULE_DST" "$UNIT_DST" "$BLACKLIST_DST"
+	rmdir "$FW_DIR" 2>/dev/null || true
 	systemctl daemon-reload
 	reload_udev
 	echo "uninstalled. (snd_usb_midex left as-is; modprobe it if you want stock.)"
