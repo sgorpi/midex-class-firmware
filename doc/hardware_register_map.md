@@ -119,7 +119,7 @@ bus-probe cannot reach SFRs).
 > turned the long-standing "external writes never land" failure (see
 > [bus_write_debug.md](bus_write_debug.md)) into a working MIDI loopback.
 >
-> **⚠ TIMING (Phase-3, 2026-06-06): release RESET + run `uart_init` LATE, not at
+> **⚠ TIMING (2026-06-06): release RESET + run `uart_init` LATE, not at
 > `board_init`.** Stock drives `OEB.4` and calls `uart_init_all_ports` only on the
 > host START (`0xFD`) cmd — i.e. **after** USB enumeration — keeping the UARTs in
 > reset (PB4 high-Z) from power-on until then. That lateness is load-bearing: the
@@ -132,7 +132,7 @@ bus-probe cannot reach SFRs).
 > `PORTBCFG.4=0`/`OUTB.4=0` (PB4 stays high-Z = in reset); a deferred
 > `uart_bringup()` (after USB up + `BOARD_UART_BRINGUP_DELAY_MS`=100 ms) sets
 > `OEB.4` then runs `uart_init`. All 8 channels then latch on the first pass.
-> Full chase: [phase3_build.md](phase3_build.md) + [bus_write_debug.md](bus_write_debug.md).
+> Full chase: [firmware_build.md](firmware_build.md) + [bus_write_debug.md](bus_write_debug.md).
 
 ### 3. MIDI data path ✅
 
@@ -220,8 +220,8 @@ the EP data handling change.
 
 - **LEDs:** no dedicated LED latch was positively identified on r1 in this pass
   (the proprietary firmware drives LEDs via the EP6 command stream, not a simple
-  XDATA latch). LEDs are **deferred** per the plan — leave dark. Revisit `0xFE00`
-  and the EP6 path in the cosmetic pass.
+  XDATA latch). LEDs are left dark; the `0xFE00` region and the EP6 path are the
+  place to revisit if LED support is ever added.
 
 ### 6. Interrupt vector table ✅
 
@@ -240,24 +240,20 @@ timing scheme and are **not needed** by the class firmware.
 
 ---
 
-## MIDEX8 r2 — CY7C646 (FX) + ST16C454 + ST16C452 — Phase 5 (stub)
+## MIDEX8 r2 — CY7C646 (FX) + ST16C454 + ST16C452 ✅
 
-Firmware: `doc/firmware/midex8r2_combined.bin` (not yet disassembled in depth).
 **MIDEX8 r2 has 8 ports** (same as r1), but the BOM
 ([`Midex hardware components.md`](../../../doc/Midex%20hardware%20components.md))
-lists only **1× ST16C454 (4) + 1× ST16C452 (2) = 6 external UART channels** — so
-**the last 2 ports must be driven some other way. ❓ Leading hypothesis: the
-EZ-USB FX (CY7C646) on-chip serial** (the FX has on-chip UARTs, the same kind
-MIDEX3 uses). That would make r2 a **hybrid backend**: 6 external-16550 (MOVX,
-like r1) + 2 on-chip-serial. So r2 is **not** a near-mechanical repeat of r1: its
-Phase-5 delta is the external UART base window + the **extra-2-port mechanism**
-(disassemble for SCON/SBUF + 2nd on-chip serial) + FX RAM ceiling `0x1B3F`.
-**Note `0x7FE5` is AUTODATA — present on the AN2131 too, NOT an FX-only init
-register** (re-examine what r2 actually needs). Full RE deferred to Phase 5.
+provides only **1× ST16C454 (4) + 1× ST16C452 (2) = 6 external UART channels**, so
+the last 2 ports are driven by the **EZ-USB FX (CY7C646) on-chip serial**. r2 is
+therefore a **hybrid backend**: 6 external-16550 channels (MOVX, like r1) + 2
+on-chip-serial. This is implemented and hardware-validated; the full RE
+comparison, register windows and the on-chip-UART mechanism are documented in
+[`midex8_r1_vs_r2.md`](midex8_r1_vs_r2.md) (the derivation behind `board_r2.h`).
 
 ---
 
-## MIDEX3 — 3 ports — future-phase delta (scoping only, no hardware)
+## MIDEX3 — 3 ports — RE scoping only (not on the build path, no hardware)
 
 Firmware: `doc/firmware/midex3_combined.bin` (6419 bytes, Mac-derived).
 Reset vector `0x0000 → LJMP 0x01C8` (`fw_main`). **Statically analyzed for effort
@@ -310,7 +306,7 @@ the mechanism confirmed on the FX-based MIDEX8 r2. The single-UART AN2131 (r1) h
 neither SFR. (PCB chip-marking confirmation still nice-to-have, but the firmware is
 now conclusive.)
 
-### MIDEX3 future-phase effort estimate
+### MIDEX3 backend effort estimate
 Larger than an r2-style `board_*.h` addition: the external-16550 MOVX backend does
 **not** apply at all. A MIDEX3 port needs **three** TX paths behind the `uart.c`
 seam — on-chip **UART0** (`SCON`/`SBUF`), on-chip **UART1** (`SCON1`/`SBUF1`), and

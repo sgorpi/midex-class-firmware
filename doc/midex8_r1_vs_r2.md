@@ -1,7 +1,7 @@
 # MIDEX8 r1 vs r2 — firmware reverse-engineering comparison
 
-Phase-5 RE pass comparing the stock proprietary firmware of the two MIDEX8
-hardware revisions, to derive a `board_r2.h` for the class-compliant firmware
+An RE comparison of the stock proprietary firmware of the two MIDEX8 hardware
+revisions, used to derive a `board_r2.h` for the class-compliant firmware
 project (`src/midex-class-firmware/`).
 
 - **r1** = MIDEX8 rev 1, **EZ-USB AN2131** + 2× ST16C454 (8 external UART channels).
@@ -280,7 +280,7 @@ bring-up proves ports 0–5 work without it.
 
 ---
 
-## 7. Implications for the Phase-5 class firmware
+## 7. Implications for the r2 class firmware
 
 - **`board_r2.h` needs a hybrid UART backend**, not a parameter tweak of
   `board_r1.h`:

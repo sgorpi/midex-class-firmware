@@ -9,43 +9,42 @@ This is a **separate repository** from the Linux kernel driver it accompanies; i
 is included there as a git submodule so the two can be maintained — and, if
 necessary, taken down — independently.
 
-## Status
+## What it does
 
-- **Phase 1 (hardware bring-up): complete.** A small EZ-USB bus-probe firmware
-  validated the reverse-engineered register map on real hardware, culminating in a
-  working external-UART **MIDI loopback** (a byte written to a port's THR returns
-  on the same port's RHR over a physical MIDI cable). The key unlock was driving
-  AN2131 **PB4 low** to de-assert the ST16C454 RESET (active-high); see
+The firmware enumerates the MIDEX8 as a standard USB Audio Class / MIDIStreaming
+device (VID `0x0A4E`, PID `0x10C1`), so the OS's generic USB-MIDI driver
+(`snd-usb-audio` on Linux) binds with no custom driver and `amidi -l` lists the
+ports. All 8 ports round-trip MIDI byte-exact, and the firmware-port→front-panel
+jack mapping is identity. The proprietary timestamp engine and host-timing tick
+are not implemented, as class-compliant USB-MIDI carries no per-event timestamps.
+
+A per-port USB-MIDI 1.0 parser ([`firmware/midi_parser.c`](firmware/midi_parser.c))
+and a non-blocking TX/RX ring bridge connect the single USB bulk endpoint pair to
+the UARTs. The FIFO-less ST16C454 has only a 1-byte RHR, so a high-priority
+Timer0 RX-capture ISR drains each port into a per-port software FIFO, keeping
+sustained streams (long SysEx) overrun-proof; see
+[`doc/timer_isr_rx_capture_design.md`](doc/timer_isr_rx_capture_design.md).
+[`firmware/midi_config.h`](firmware/midi_config.h) `NUM_MIDI_PORTS` is the single
+knob that scales the descriptors and bridge.
+
+Both MIDEX8 hardware revisions are supported:
+
+- **r1** (EZ-USB AN2131): all 8 ports are external 16550 channels (two ST16C454).
+  Bring-up de-asserts the ST16C454 RESET by driving AN2131 **PB4 low**; see
   [`doc/bus_write_debug.md`](doc/bus_write_debug.md).
-- **Phase 2 (class-compliant spike): complete, hardware-validated.** The
-  firmware enumerates as a standard USB Audio Class / MIDIStreaming device
-  (VID `0x0A4E`, PID `0x10C1`); `snd-usb-audio` binds with no custom driver and
-  `amidi -l` lists the ports.
-- **Phase 3 (full r1: all 8 ports + real RX MIDI parser): complete,
-  hardware-validated.** A per-port USB-MIDI 1.0 parser (`midi_parser.c`) and a
-  non-blocking TX/RX ring bridge feed the eight external 16550 UARTs; all 8 ports
-  round-trip MIDI byte-exact. The earlier **sustained-SysEx RX overrun** (the
-  FIFO-less ST16C454 has a 1-byte RHR) is **resolved** by a high-priority Timer0
-  RX-capture ISR that drains the RHR into per-port software FIFOs; see
-  [`doc/timer_isr_rx_capture_design.md`](doc/timer_isr_rx_capture_design.md).
-  [`firmware/midi_config.h`](firmware/midi_config.h) `NUM_MIDI_PORTS` is the
-  single knob that scales the descriptors + bridge.
-- **Phase 5 (MIDEX8 r2 = EZ-USB FX CY7C646): complete, hardware-validated.**
-  r2 is a **hybrid backend** — 6 external 16550 channels (ST16C454 + ST16C452,
-  divisor 24 off a fixed 12 MHz crystal) drive ports 1–6, and the FX's **two
-  on-chip UARTs** drive ports 7–8. A board seam ([`board.h`](firmware/board.h),
-  `make BOARD=r2`) selects [`board_r2.h`](firmware/board_r2.h) and a split UART
-  backend ([`uart_ext.c`](firmware/uart_ext.c) + [`uart_onchip.c`](firmware/uart_onchip.c))
+- **r2** (EZ-USB FX CY7C646): a **hybrid backend** — 6 external 16550 channels
+  (ST16C454 + ST16C452, divisor 24 off a fixed 12 MHz crystal) drive ports 1–6,
+  and the FX's **two on-chip UARTs** drive ports 7–8. A board seam
+  ([`board.h`](firmware/board.h), `make BOARD=r2`) selects
+  [`board_r2.h`](firmware/board_r2.h) and a split UART backend
+  ([`uart_ext.c`](firmware/uart_ext.c) + [`uart_onchip.c`](firmware/uart_onchip.c))
   behind the shared op-set; the on-chip ports are polled, and the single
-  high-priority Timer0 RX-capture ISR services both backends. All 8 ports
-  round-trip MIDI byte-exact and the firmware-port→panel-jack mapping is
-  identity. The proprietary timestamp engine and host-timing tick are dropped
-  (class-compliant USB-MIDI has no per-event timestamps). Full RE comparison:
+  high-priority Timer0 RX-capture ISR services both backends. Full RE comparison:
   [`doc/midex8_r1_vs_r2.md`](doc/midex8_r1_vs_r2.md).
 
-The bus-probe is retained as a diagnostic (`make probe`); the class firmware is
-the default build — `make class` (r1), `make BOARD=r2 class` (r2), or `make both`
-to produce both images. The host installer auto-uploads the image matching the
+`make class` builds the r1 image, `make BOARD=r2 class` the r2 image, and
+`make both` produces both. A small EZ-USB bus-probe firmware is retained as a
+diagnostic (`make probe`). The host installer auto-uploads the image matching the
 appearing device's loader PID (`0x1000`→r1, `0x1010`→r2), so plugging in either
 revision just works; see [`host/README.md`](host/README.md).
 
@@ -185,6 +184,14 @@ path (`snd-usbmidi`) filters them on input.
   [external-write debug log](doc/bus_write_debug.md), and the
   [r1 vs r2 firmware comparison](doc/midex8_r1_vs_r2.md) (the hybrid-backend
   derivation behind `board_r2.h`).
+
+## License
+
+Released under the **GNU General Public License v2.0 or later** — see
+[`LICENSE`](LICENSE). The USB enumeration scaffolding under `firmware/`
+(`usb.c`, `usb.h`, `common.h`, `delay.*`, `io.h`, `reg_ezusb.h`, `USBJmpTb.a51`,
+`usb_probe.c`) is vendored from the [OpenULINK](https://github.com/OpenULINK)
+fork and retains its original copyright notices; it is GPLv2-compatible.
 
 ## Legal
 

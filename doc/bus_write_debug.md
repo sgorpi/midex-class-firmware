@@ -1,7 +1,7 @@
 # MIDEX8 r1 bus-probe bring-up — status & the external-write puzzle
 
-Status of the Phase-1 hardware confirmation (the EP0 MOVX bus-probe). Read
-together with [hardware_register_map.md](hardware_register_map.md).
+Hardware-confirmation log for the EP0 MOVX bus-probe. Read together with
+[hardware_register_map.md](hardware_register_map.md).
 
 ## ✅ RESOLVED (2026-06-05) — the UART was held in RESET; drive PB4 low
 
@@ -185,8 +185,8 @@ hammer drives alternating **0x55 / 0xAA**, so every data bit toggles. During
   (a) ⇒ chase the 74HC245 direction and the PAL outputs on the data net.
 
 If (a)/(b) stay ambiguous on the DMM, a **scope/logic-analyzer** on {−IOW, −CSD,
-D0–D7} during one write is the definitive tool (the plan's declined escape hatch);
-the DMM has taken us as far as averaged DC can.
+D0–D7} during one write is the definitive tool; the DMM has taken us as far as
+averaged DC can.
 
 ### Data-bus result (2026-06-02): data DOES reach the UART
 
@@ -287,7 +287,7 @@ remaining difference is a **timing/analog detail invisible to a DMM**.
   relative to the ~168 ns −IOW pulse for the write-latch edge; reads (data valid
   whenever −CS+−IOR overlap) are more forgiving than the write's edge-latch.
 
-### NEXT SESSION — scope/logic-analyzer plan (the decisive test)
+### Scope/logic-analyzer procedure (the decisive test)
 
 Trigger on the −IOW falling edge at ST16C454 **pin 18**; capture simultaneously:
 - **−IOW (pin 18)**, **−CS** of the addressed channel (e.g. pin 54 for port 8),
@@ -394,14 +394,14 @@ Controls:
 ## If the multimeter can't resolve it
 
 A logic analyzer / scope on `WR#`, the UART `/WR`/`/CS`, the 245 `DIR`/`/OE`,
-and `D0–D7` during a single hammered write is the definitive tool (the plan's
-declined escape hatch). The bus-probe has already de-risked the rest: the read
+and `D0–D7` during a single hammered write is the definitive tool. The bus-probe
+has already de-risked the rest: the read
 map is confirmed and the firmware is known-good up to this one strobe-delivery
 question.
 
-## Phase-3 sequel: the write glue is also marginal AT POWER-ON (2026-06-06)
+## Sequel: the write glue is also marginal AT POWER-ON (2026-06-06)
 
-A second, related symptom surfaced in the Phase-3 class firmware (8-port init):
+A second, related symptom surfaced in the class firmware (8-port init):
 **exactly one channel would come up with its `LCR` stuck at the reset default
 `0x00` (5-bit) instead of `0x03`**, corrupting that port (`0x90`→`0x10`). The
 victim was deterministic for a given build but *moved* between builds (port 2 →

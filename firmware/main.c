@@ -1,5 +1,24 @@
 /*
- * MIDEX8 r1 class-compliant MIDI firmware - Phase 3 (full 8-port build).
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Copyright (C) 2026 Hedde Bosman (sgorpi@gmail.com)
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, see <https://www.gnu.org/licenses/>.
+ */
+
+/*
+ * MIDEX8 r1 class-compliant MIDI firmware - full 8-port build.
  *
  * Enumerates as a standard USB Audio Class / MIDIStreaming device (VID 0x0A4E,
  * PID 0x10C1) with NUM_MIDI_PORTS bidirectional cables, so the OS's generic
@@ -17,8 +36,8 @@
  *     event packets (running status, channel/system-common lengths, SysEx, and
  *     real-time bytes -> correct CINs) on EP2-IN.
  *
- * Bring-up (board_init) and the UART register map are the hardware-validated
- * Phase-1 findings; see ../doc/hardware_register_map.md. Enumeration scaffolding
+ * Bring-up (board_init) and the UART register map are hardware-validated;
+ * see ../doc/hardware_register_map.md. Enumeration scaffolding
  * (usb.c, usb_descriptors.c, USBJmpTb.a51, reg_ezusb.h) is vendored from
  * src/ezusb-firmware (OpenULINK fork).
  */
@@ -78,8 +97,8 @@ static const __code uint8_t cin_len[16] = {
 
 /*
  * Bring up the external-memory bus and the UART clock the way the stock
- * fw_entry does before any UART access. Hardware-validated in Phase 1 (the EP0
- * bus-probe loopback). See ../doc/hardware_register_map.md.
+ * fw_entry does before any UART access. Hardware-validated via the EP0
+ * bus-probe loopback. See ../doc/hardware_register_map.md.
  */
 static void board_init(void)
 {
@@ -154,7 +173,7 @@ static void board_init(void)
 	OUTB     &= ~OUTB4;  /* PB4 output latch = 0 (drives RESET low once enabled) */
 
 	/* 0xFE00.. is external SRAM bookkeeping (not a UART latch). Retained to
-	 * match the bring-up state the Phase-1 loopback validated; not load-bearing. */
+	 * match the bring-up state the loopback validated; not load-bearing. */
 	*((__xdata uint8_t *)BOARD_GLUE_LATCH) = BOARD_GLUE_VALUE;
 	*((__xdata uint8_t *)0xFE02) = 0x00;
 	*((__xdata uint8_t *)0xFE01) = 0x10;

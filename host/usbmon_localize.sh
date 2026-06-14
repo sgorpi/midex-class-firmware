@@ -1,7 +1,24 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-or-later
 #
-# usbmon_localize.sh - localize the F0/F8/FE round-trip drop seen in the Phase-2
-# spike (see ../doc/spike_bringup.md "system status bytes are dropped").
+# Copyright (C) 2026 Hedde Bosman (sgorpi@gmail.com)
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, see <https://www.gnu.org/licenses/>.
+
+#
+# usbmon_localize.sh - localize an F0/F8/FE round-trip drop (see
+# ../doc/bringup.md "system status bytes are dropped").
 #
 # It captures the EP2 bulk traffic (Bo:...:02 host->device, Bi:...:02
 # device->host) on the MIDEX while a continuous receiver is up and we send three
@@ -29,7 +46,7 @@ DUR=8
 # --- discover the MIDEX: bus, device address, and an ALSA port -----------------
 LSUSB_LINE="$(lsusb -d 0a4e:10c1 | head -n1)"
 if [ -z "$LSUSB_LINE" ]; then
-	echo "No 0a4e:10c1 (spike firmware) found. Upload midex-class-r1.ihx first." >&2
+	echo "No 0a4e:10c1 (class firmware) found. Upload midex-class-r1.ihx first." >&2
 	exit 1
 fi
 BUS="$(printf '%s\n' "$LSUSB_LINE" | sed -E 's/^Bus ([0-9]+) Device ([0-9]+):.*/\1/')"
