@@ -35,7 +35,12 @@ FW_DIR=/usr/local/lib/midex
 FW_DST_R1=$FW_DIR/midex-class-r1.ihx
 FW_DST_R2=$FW_DIR/midex-class-r2.ihx
 RULE_DST=/etc/udev/rules.d/99-midex-class.rules
-UNIT_DST=/etc/systemd/system/midex-upload@.service
+# The unit lives in the vendor dir (/usr/lib), NOT /etc: `systemctl mask`
+# masks a unit by symlinking its path to /dev/null, and it refuses to clobber
+# a regular file in /etc. With the unit in /usr/lib, the mask symlink in /etc
+# shadows it correctly, so `stock` can actually disable auto-upload.
+UNIT_DST=/usr/lib/systemd/system/midex-upload@.service
+UNIT_DST_LEGACY=/etc/systemd/system/midex-upload@.service
 BLACKLIST_DST=/etc/modprobe.d/midex-class.conf
 STOCK_MODULE=snd_usb_midex
 
@@ -65,6 +70,10 @@ cmd_install() {
 	[ -f "$FW_SRC_R1" ] && install -Dm644 "$FW_SRC_R1" "$FW_DST_R1" && echo "  + r1 image"
 	[ -f "$FW_SRC_R2" ] && install -Dm644 "$FW_SRC_R2" "$FW_DST_R2" && echo "  + r2 image"
 	install -Dm644 "$RULE_SRC" "$RULE_DST"
+	# Migrate away from an older install that put the unit (or a failed mask
+	# symlink) in /etc, which would block masking under the new layout.
+	systemctl unmask midex-upload@.service 2>/dev/null || true
+	rm -f "$UNIT_DST_LEGACY"
 	install -Dm644 "$UNIT_SRC" "$UNIT_DST"
 	systemctl daemon-reload
 	reload_udev
@@ -85,7 +94,13 @@ cmd_stock() {
 	need_root stock
 	rm -f "$BLACKLIST_DST"
 	# Mask the upload unit so a stray udev trigger cannot re-flash the device.
-	systemctl mask midex-upload@.service 2>/dev/null || true
+	# A stale unit file in /etc would make this silently fail, so verify it
+	# actually took and warn loudly otherwise (the dispatcher would keep
+	# uploading the class firmware in that case).
+	systemctl mask midex-upload@.service || true
+	if [ "$(systemctl is-enabled midex-upload@.service 2>/dev/null)" != "masked" ]; then
+		echo "warning: could not mask midex-upload@.service (is it still in $UNIT_DST_LEGACY?); re-run '$0 install' to fix the unit location." >&2
+	fi
 	reload_udev
 	modprobe "$STOCK_MODULE" 2>/dev/null || true
 	echo "stock path active. Power-cycle the MIDEX; snd_usb_midex will claim it."
@@ -112,7 +127,8 @@ cmd_status() {
 cmd_uninstall() {
 	need_root uninstall
 	systemctl unmask midex-upload@.service 2>/dev/null || true
-	rm -f "$BIN_DST" "$DISPATCH_DST" "$FW_DST_R1" "$FW_DST_R2" "$RULE_DST" "$UNIT_DST" "$BLACKLIST_DST"
+	rm -f "$BIN_DST" "$DISPATCH_DST" "$FW_DST_R1" "$FW_DST_R2" "$RULE_DST" \
+	      "$UNIT_DST" "$UNIT_DST_LEGACY" "$BLACKLIST_DST"
 	rmdir "$FW_DIR" 2>/dev/null || true
 	systemctl daemon-reload
 	reload_udev
