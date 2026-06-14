@@ -1,4 +1,23 @@
 /*
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Copyright (C) 2026 Hedde Bosman (sgorpi@gmail.com)
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, see <https://www.gnu.org/licenses/>.
+ */
+
+/*
  * MIDEX8 r1 bus-probe firmware.
  *
  * A minimal EZ-USB (AN2131) firmware whose only job is to validate the static
@@ -10,7 +29,8 @@
  *
  * Use from the host (see ../host) to drive the 16550 init + THR write and
  * confirm a MIDI byte appears on a physical port, and to read RHR back on the
- * looped-in port. This grows directly into the Phase 2 class-compliant spike.
+ * looped-in port. It is retained as a diagnostic alongside the class-compliant
+ * firmware (build with `make probe`).
  *
  * Enumeration scaffolding (usb.c, USBJmpTb.a51, reg_ezusb.h, ...) is vendored
  * from src/ezusb-firmware (OpenULINK fork) and kept byte-identical except for

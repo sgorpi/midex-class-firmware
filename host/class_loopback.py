@@ -1,5 +1,22 @@
 #!/usr/bin/env python3
-"""ALSA `amidi` loopback test for the class-compliant MIDEX8 spike firmware.
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Copyright (C) 2026 Hedde Bosman (sgorpi@gmail.com)
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, see <https://www.gnu.org/licenses/>.
+
+"""ALSA `amidi` loopback test for the class-compliant MIDEX8 firmware.
 
 Unlike loopback.py (which drives the *bus-probe* over EP0 vendor commands), the
 class firmware enumerates as a standard USB-MIDI device that the inbox
@@ -11,9 +28,9 @@ message sent on that ALSA port should come straight back. This script discovers
 the MIDEX ports (`amidi -l`), then sends test messages on each and listens for
 them to return.
 
-  ./spike_loopback.py              # GATE: one SysEx per port (Phase-2 pass/fail)
-  ./spike_loopback.py -n 2         # require/test the first 2 ports
-  ./spike_loopback.py --diag       # DIAGNOSTIC: note-ons + SysEx, repeated, per
+  ./class_loopback.py              # GATE: one SysEx per port (pass/fail)
+  ./class_loopback.py -n 2         # require/test the first 2 ports
+  ./class_loopback.py --diag       # DIAGNOSTIC: note-ons + SysEx, repeated, per
                                    #   message (discriminates first-packet vs
                                    #   per-message vs SysEx-specific loss)
 
@@ -149,9 +166,8 @@ def main():
         return
 
     # Gate mode: one note-on per port, strict pass/fail. Channel voice messages
-    # are the right probe for the spike's CIN=0xF passthrough; SysEx and system
-    # real-time framing is Phase-3 (the real MIDI parser) -- use --diag to see
-    # that behaviour.
+    # are a simple probe; use --diag to exercise SysEx and system real-time
+    # framing through the MIDI parser as well.
     print(f"Testing {len(ports)} MIDEX port(s) -- loop each DIN OUT->IN:\n")
     passed = 0
     for idx, (addr, name) in enumerate(ports):
@@ -160,7 +176,7 @@ def main():
         passed += ok
     print()
     if passed == len(ports):
-        print(f"=> All {passed} port(s) round-tripped. Phase-2 gate PASS.")
+        print(f"=> All {passed} port(s) round-tripped. PASS.")
         sys.exit(0)
     print(f"=> {passed}/{len(ports)} port(s) round-tripped. Check the cable on "
           f"failing ports (or run --diag).")

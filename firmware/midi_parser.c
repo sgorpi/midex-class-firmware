@@ -1,8 +1,27 @@
 /*
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Copyright (C) 2026 Hedde Bosman (sgorpi@gmail.com)
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, see <https://www.gnu.org/licenses/>.
+ */
+
+/*
  * midi_parser.c - USB-MIDI 1.0 RX stream parser (instrument -> host).
  *
- * Phase 3: replaces the spike's CIN=0xF single-byte passthrough. Each UART
- * channel carries a raw MIDI byte stream; this parser reassembles it into
+ * Each UART channel carries a raw MIDI byte stream; this parser reassembles it
+ * into
  * proper 4-byte USB-MIDI event packets (USB MIDI 1.0 spec, table 4-1) with the
  * correct Code Index Number, honouring:
  *   - channel voice message lengths (note off/on, poly-AT, CC = 2 data bytes;

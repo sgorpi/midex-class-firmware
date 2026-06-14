@@ -17,8 +17,8 @@
 /**
  * @file USB SETUP / enumeration engine for the class-compliant MIDEX8 firmware.
  *
- * Vendored from src/ezusb-firmware (OpenULINK fork) and trimmed to the
- * class-compliant spike: the descriptor data now lives in usb_descriptors.c
+ * Vendored from src/ezusb-firmware (OpenULINK fork) and trimmed for the
+ * class-compliant firmware: the descriptor data now lives in usb_descriptors.c
  * (referenced here as externs), and non-standard (class/vendor) control
  * requests are stalled -- a class-compliant MIDIStreaming device needs no
  * device-specific control requests.

@@ -1,10 +1,29 @@
 /*
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Copyright (C) 2026 Hedde Bosman (sgorpi@gmail.com)
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, see <https://www.gnu.org/licenses/>.
+ */
+
+/*
  * uart.h - external 16550 (ST16C454) UART backend for MIDEX8 r1.
  *
- * This is the firmware's informal "UART op-set" seam (see the plan): the MIDI
- * bridge in main.c talks only to these five operations, so r2 can reuse them via
- * board config and a future MIDEX3 / r2-extra-port backend can re-implement them
- * over on-chip serial without touching the bridge.
+ * This is the firmware's informal "UART op-set" seam: the MIDI bridge in main.c
+ * talks only to these operations, so r2 reuses them via board config and its
+ * on-chip-serial backend (uart_onchip.c) re-implements them without touching the
+ * bridge.
  *
  * Preconditions: board_init() must have run first (RD#/WR# strobes, the Timer2
  * -> PB7 500 kHz XIN clock, and the PB4 RESET de-assert). See board.c / the

@@ -1,19 +1,18 @@
-# Phase 3 — full r1 build (8 ports + real MIDI parser)
+# MIDEX8 r1 firmware build & validation
 
-Builds on the [Phase 2 spike](spike_bringup.md). Same firmware image name
-(`firmware/midex-class-r1.ihx`, `make class`), same PID `0x0A4E:0x10C1`, same
-single EP2-IN/EP2-OUT bulk pair — but now **8 bidirectional cables** and a
-**real USB-MIDI 1.0 RX stream parser** in place of the spike's CIN=0xF
-single-byte passthrough.
+The r1 firmware (`firmware/midex-class-r1.ihx`, `make class`) enumerates as PID
+`0x0A4E:0x10C1` over a single EP2-IN/EP2-OUT bulk pair, presenting **8
+bidirectional cables** with a **USB-MIDI 1.0 RX stream parser**. This note
+records how the build is laid out and how it was validated on hardware.
 
 **Confidence legend:** ✅ confirmed on hardware · ⚠️ inferred / built-not-tested · ❓ open.
 
-## What changed from the spike
+## How the build is laid out
 
-1. **`NUM_MIDI_PORTS` 2 → 8** (`firmware/midi_config.h`). The TX bridge and the
-   RX pump already loop `0..NUM_MIDI_PORTS-1`, so the per-port `0x4040 + port*8`
-   UART stride scales unchanged.
-2. **Descriptors scaled to 8 ports** (`firmware/usb_descriptors.c`). The jack
+1. **`NUM_MIDI_PORTS` = 8** (`firmware/midi_config.h`). The TX bridge and the
+   RX pump loop `0..NUM_MIDI_PORTS-1`, so the per-port `0x4040 + port*8`
+   UART stride scales with this single knob.
+2. **Descriptors for 8 ports** (`firmware/usb_descriptors.c`). The jack
    list is hand-unrolled via a `MIDI_PORT_JACKS(p)` macro (ids `4p+1..4p+4`,
    p = 0..7 → jack ids 1..32). Length constants (`CONFIG_TOTAL_LEN`,
    `MS_TOTAL_LEN`) now derive from `NUM_MIDI_PORTS`; the `config_block_len_check`
@@ -21,9 +20,8 @@ single-byte passthrough.
    endpoint association arrays map cable p → Embedded-IN jack `4p+1`
    (`1,5,…,29`) on EP2-OUT and cable p → Embedded-OUT jack `4p+3` (`3,7,…,31`)
    on EP2-IN. Final `wTotalLength` = **325 bytes** (the EZ-USB SUDPTR auto-length
-   engine streams it across EP0 in 64-byte chunks, exactly as the 133-byte spike
-   descriptor was streamed).
-3. **Real RX parser** (`firmware/midi_parser.{c,h}`, called from `main.c`'s loop
+   engine streams it across EP0 in 64-byte chunks).
+3. **RX parser** (`firmware/midi_parser.{c,h}`, called from `main.c`'s loop
    as `midi_rx_pump()`). Per-cable state in XDATA reassembles each UART byte
    stream into self-contained 4-byte USB-MIDI event packets:
    - **Channel voice** (`0x80–0xEF`): CIN = status high nibble; note off/on,
@@ -39,10 +37,9 @@ single-byte passthrough.
    - **System real-time** (`0xF8–0xFF`): each emitted as a CIN 0xF single;
      interleaves anywhere without disturbing running status or an open SysEx.
 
-   **Key fix during bring-up:** every completed-message packet places the MIDI
-   **status byte in MIDI_0** (`emit(cn, cin, status, d0, d1)`). The spike's
-   CIN=0xF passthrough emitted each raw byte separately, so it never had to carry
-   an explicit status byte; a proper CIN-framed packet must.
+   **Note:** every completed-message packet places the MIDI **status byte in
+   MIDI_0** (`emit(cn, cin, status, d0, d1)`), since a proper CIN-framed USB-MIDI
+   packet must carry an explicit status byte.
 
 ## Build status ✅ (hardware-validated, all 8 ports)
 
@@ -56,10 +53,10 @@ single-byte passthrough.
   (8 embedded + 8 external each direction); endpoint assoc arrays
   `1,5,…,29` and `3,7,…,31`.
 - **On hardware (2026-06-06):** every port round-trips MIDI OUT→IN
-  (`spike_loopback.py`, cables moved across all 8 ports), and an on-device LCR
+  (`class_loopback.py`, cables moved across all 8 ports), and an on-device LCR
   readback shows all 8 channels at `0x03` (8N1), latching on the first init pass.
 
-## Bug found + fixed during bring-up: deferred UART init ✅
+## Why UART init is deferred ✅
 
 The first 8-port build round-tripped most ports but **exactly one channel came
 up dead** (originally port 2). Root-caused over a long debug session:
@@ -69,7 +66,7 @@ up dead** (originally port 2). Root-caused over a long debug session:
   truncates every byte to its low 5 bits (`0x90`→`0x10`), so the bridge's parser
   correctly dropped the garbage and emitted nothing. The parser was never at
   fault.
-- The Phase-1 **bus-probe round-tripped that same channel perfectly** (including
+- The **bus-probe round-tripped that same channel perfectly** (including
   with FIFOs on), so the UART hardware/socket/opto were fine. The fault was the
   class firmware's **`uart_init`**.
 - The victim was **deterministic per build but moved between builds** (port 2 →
@@ -101,29 +98,23 @@ Each test needs a power-cycle (→ loader PID `0x1000`) + re-upload, with
    one MIDIStreaming interface with **8** embedded jacks each way; `amidi -l`
    lists `MIDEX8 UAC MIDI 1`…`MIDI 8`.
 2. **All-8-port loopback:** patch a MIDI cable OUT→IN on each port, then
-   `host/spike_loopback.py -n 8` — expect a byte-exact note-on round-trip on
+   `host/class_loopback.py -n 8` — expect a byte-exact note-on round-trip on
    every cable (proves cable↔port order and the parser's channel-voice path).
-3. **Parser robustness** (Verification step 4 in the plan): with one continuous
-   `amidi -p PORT -d` receiver, stream:
+3. **Parser robustness:** with one continuous `amidi -p PORT -d` receiver, stream:
    - running status (`90 3C 7F 3E 7F 40 7F`) → three note-ons surface;
    - a SysEx split across the 64-byte boundary;
    - a real-time byte (`F8`) mid-message → note completes, clock passes through;
    - sustained all-port throughput.
-   Re-check the spike's deferred `F0`/`F8`/`FE` observations now that SysEx is
-   framed as CIN 0x4 (see spike_bringup.md "Localized"): `F8`/`FE` were
-   **host-input filtering** (not ours); `F0` was a device-side loopback artifact
-   — confirm whether it persists with proper SysEx framing.
+   The `F0`/`F8`/`FE` observations from early bring-up (see bringup.md
+   "Localized") resolve as: `F8`/`FE` were **host-input filtering** (not ours);
+   `F0` was a device-side loopback artifact.
 
-## Open / deferred (unchanged from the plan)
+## Known limitations / possible optimisations
 
-- **TX path** still busy-waits per byte on THRE (`bridge_tx` in `main.c`). FIFOs
-  are enabled (FCR=0x07) so writes mostly don't stall, but a large host→device
-  burst can briefly starve the RX pump; revisit only if RX FIFO overflow shows
-  up under load.
-- **PINSA per-port RX IRQ bitmap** — still the optional perf lever (1 MOVX vs 8
-  LSR reads). Not needed for correctness; gate on a probe check of IER→PINSA
-  polarity and re-trace per revision.
-- **LEDs** left dark (no XDATA latch found).
+- **PINSA per-port RX IRQ bitmap** — an optional perf lever (1 MOVX vs 8 LSR
+  reads) not needed for correctness; would need a probe check of IER→PINSA
+  polarity and a per-revision re-trace.
+- **LEDs** are left dark (no XDATA latch found).
 
 ## End-to-end validation (host/e2e_test.py, 2026-06-07)
 

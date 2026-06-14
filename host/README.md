@@ -113,17 +113,17 @@ sudo fxload -t an21 -I firmware.ihx -D /dev/bus/usb/<bus>/<dev>
 `midex-fw-upload` exists so the *same* codebase works on Windows and macOS
 where `fxload` is unavailable.
 
-## Testing the class-compliant spike
+## Testing the class-compliant firmware
 
 After uploading `midex-class-r1.ihx`, the device enumerates as a standard
 USB-MIDI device (PID `0x10C1`) and `snd-usb-audio` binds — no custom protocol.
-[`spike_loopback.py`](spike_loopback.py) drives the Phase-2 gate over ALSA
+[`class_loopback.py`](class_loopback.py) is a quick smoke test over ALSA
 `amidi`: it discovers the MIDEX ports and round-trips a SysEx on each.
 
 ```sh
 # patch a MIDI cable OUT->IN on each port under test, then:
-./spike_loopback.py            # test every discovered MIDEX port
-./spike_loopback.py -n 2       # require/test the first 2 ports
+./class_loopback.py            # test every discovered MIDEX port
+./class_loopback.py -n 2       # require/test the first 2 ports
 ```
 
 Needs `alsa-utils` (`amidi`); no root required if your user can reach the sound

@@ -1,15 +1,34 @@
 /*
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Copyright (C) 2026 Hedde Bosman (sgorpi@gmail.com)
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, see <https://www.gnu.org/licenses/>.
+ */
+
+/*
  * board_r1.h - MIDEX8 r1 (AN2131 + 2x ST16C454) board configuration.
  *
  * Derived from static RE of doc/firmware/midex8_firmware_combined.bin.
  * See src/midex-class-firmware/doc/hardware_register_map.md for the full
- * analysis and confidence levels. Values marked CONFIRM need hardware
- * validation via the EP0 bus-probe before the Phase 2 spike is trusted.
+ * analysis and confidence levels. Values marked CONFIRM were validated on
+ * hardware via the EP0 bus-probe (main_probe.c).
  */
 #ifndef BOARD_R1_H
 #define BOARD_R1_H
 
-/* ---- USB identity (Phase 2 spike fills descriptors) -------------------- */
+/* ---- USB identity (descriptors live in usb_descriptors.c) ------------- */
 #define BOARD_USB_VID        0x0A4E   /* Steinberg                         */
 #define BOARD_USB_PID        0x10C1   /* fresh class-compliant PID, outside
                                        * the snd-usb-midex table so that
@@ -133,6 +152,6 @@
 
 /* ---- Not present / not used on r1 ------------------------------------- */
 #define BOARD_HAS_FX_INIT    0        /* r2 sets 0x7FE5; r1 does not        */
-#define BOARD_HAS_LED_LATCH  0        /* no XDATA LED latch found; deferred */
+#define BOARD_HAS_LED_LATCH  0        /* no XDATA LED latch found; unused   */
 
 #endif /* BOARD_R1_H */

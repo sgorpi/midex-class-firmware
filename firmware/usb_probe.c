@@ -36,7 +36,7 @@
 /// USB idVendor value - Steinberg
 #define ID_VENDOR   0x0A4E
 /// USB idProduct value - MIDEX8 r1 bus-probe (vendor-class; outside the
-/// snd-usb-midex table). Distinct from the class-compliant spike PID 0x10C1.
+/// snd-usb-midex table). Distinct from the class-compliant firmware PID 0x10C1.
 #define ID_PRODUCT  0x10C0
 /// USB bcdDevice value, Release Number (in BCD)
 #define BCD_DEVICE  0x0100

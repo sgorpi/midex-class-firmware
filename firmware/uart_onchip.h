@@ -1,4 +1,23 @@
 /*
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Copyright (C) 2026 Hedde Bosman (sgorpi@gmail.com)
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, see <https://www.gnu.org/licenses/>.
+ */
+
+/*
  * uart_onchip.h - EZ-USB FX on-chip UART backend (MIDEX8 r2 ports 6 & 7).
  *
  * The second backend behind the uart.c op-set dispatcher (the first is
@@ -10,12 +29,12 @@
  * TI flag in the main-loop pump; RX is captured by the shared Timer0 ISR in
  * uart.c, which polls RI and reads SBUF/SBUF1 directly (no serial interrupts).
  *
- *   FUTURE (throughput optimisation, see ../doc/midex8_r1_vs_r2.md): switch to
- *   the stock interrupt-driven model -- enable ES0/ES1, let the serial ISRs flag
- *   RX + reload TX, and move the SBUF read out of the Timer0 ISR. That removes
- *   the ~279 us single-byte-SBUF capture latency at the cost of two ISRs and
- *   cross-bank flag plumbing. Deferred until e2e throughput measurement shows a
- *   need.
+ *   A possible throughput optimisation (see ../doc/midex8_r1_vs_r2.md) is the
+ *   stock interrupt-driven model -- enable ES0/ES1, let the serial ISRs flag
+ *   RX + reload TX, and move the SBUF read out of the Timer0 ISR. That would
+ *   remove the ~279 us single-byte-SBUF capture latency at the cost of two ISRs
+ *   and cross-bank flag plumbing; the polled model measures well within the UART
+ *   line-rate ceiling, so it is not used.
  */
 #ifndef UART_ONCHIP_H
 #define UART_ONCHIP_H
